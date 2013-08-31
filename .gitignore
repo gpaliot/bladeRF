@@ -1,8 +1,7 @@
 *.o
 *.elf
 *.img
-*.swp
-*.swo
+*.s[a-w][a-z]
 *.~
 *.cmd
 *.order
@@ -19,5 +18,6 @@ hdl/quartus/work/*
 fx3_firmware/make/toolchain.mk
 fx3_firmware/elf2img
 
-linux/apps/bin/*
-
+host/build/*
+host/libraries/libbladeRF/doc/doxygen/html
+host/libraries/libbladeRF/doc/doxygen/Doxyfile
