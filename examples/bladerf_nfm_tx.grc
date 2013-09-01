@@ -1,6 +1,65 @@
 <?xml version='1.0' encoding='ASCII'?>
 <flow_graph>
-  <timestamp>Sun Aug 11 13:21:52 2013</timestamp>
+  <timestamp>Sat Aug 31 21:02:56 2013</timestamp>
+  <block>
+    <key>options</key>
+    <param>
+      <key>id</key>
+      <value>bladerf_nfm_tx</value>
+    </param>
+    <param>
+      <key>_enabled</key>
+      <value>True</value>
+    </param>
+    <param>
+      <key>title</key>
+      <value>Example NBFM transmitter</value>
+    </param>
+    <param>
+      <key>author</key>
+      <value>W2XH</value>
+    </param>
+    <param>
+      <key>description</key>
+      <value></value>
+    </param>
+    <param>
+      <key>window_size</key>
+      <value>1280, 1024</value>
+    </param>
+    <param>
+      <key>generate_options</key>
+      <value>wx_gui</value>
+    </param>
+    <param>
+      <key>category</key>
+      <value>Custom</value>
+    </param>
+    <param>
+      <key>run_options</key>
+      <value>prompt</value>
+    </param>
+    <param>
+      <key>run</key>
+      <value>True</value>
+    </param>
+    <param>
+      <key>max_nouts</key>
+      <value>0</value>
+    </param>
+    <param>
+      <key>realtime_scheduling</key>
+      <value></value>
+    </param>
+    <param>
+      <key>_coordinate</key>
+      <value>(10, 10)</value>
+    </param>
+    <param>
+      <key>_rotation</key>
+      <value>0</value>
+    </param>
+  </block>
   <block>
     <key>variable</key>
     <param>
@@ -64,104 +123,6 @@
     <param>
       <key>_coordinate</key>
       <value>(13, 255)</value>
-    </param>
-    <param>
-      <key>_rotation</key>
-      <value>0</value>
-    </param>
-  </block>
-  <block>
-    <key>blocks_wavfile_source</key>
-    <param>
-      <key>id</key>
-      <value>blocks_wavfile_source_0</value>
-    </param>
-    <param>
-      <key>_enabled</key>
-      <value>True</value>
-    </param>
-    <param>
-      <key>file</key>
-      <value>/tmp/w2xh_id.wav</value>
-    </param>
-    <param>
-      <key>repeat</key>
-      <value>True</value>
-    </param>
-    <param>
-      <key>nchan</key>
-      <value>1</value>
-    </param>
-    <param>
-      <key>affinity</key>
-      <value></value>
-    </param>
-    <param>
-      <key>minoutbuf</key>
-      <value>0</value>
-    </param>
-    <param>
-      <key>_coordinate</key>
-      <value>(393, 62)</value>
-    </param>
-    <param>
-      <key>_rotation</key>
-      <value>0</value>
-    </param>
-  </block>
-  <block>
-    <key>options</key>
-    <param>
-      <key>id</key>
-      <value>bladerf_nfm_tx</value>
-    </param>
-    <param>
-      <key>_enabled</key>
-      <value>True</value>
-    </param>
-    <param>
-      <key>title</key>
-      <value>Example NBFM transmitter</value>
-    </param>
-    <param>
-      <key>author</key>
-      <value>W2XH</value>
-    </param>
-    <param>
-      <key>description</key>
-      <value></value>
-    </param>
-    <param>
-      <key>window_size</key>
-      <value>1280, 1024</value>
-    </param>
-    <param>
-      <key>generate_options</key>
-      <value>wx_gui</value>
-    </param>
-    <param>
-      <key>category</key>
-      <value>Custom</value>
-    </param>
-    <param>
-      <key>run_options</key>
-      <value>prompt</value>
-    </param>
-    <param>
-      <key>run</key>
-      <value>True</value>
-    </param>
-    <param>
-      <key>max_nouts</key>
-      <value>0</value>
-    </param>
-    <param>
-      <key>realtime_scheduling</key>
-      <value></value>
-    </param>
-    <param>
-      <key>_coordinate</key>
-      <value>(10, 10)</value>
     </param>
     <param>
       <key>_rotation</key>
@@ -279,10 +240,10 @@
     </param>
   </block>
   <block>
-    <key>analog_nbfm_tx</key>
+    <key>blks2_nbfm_tx</key>
     <param>
       <key>id</key>
-      <value>analog_nbfm_tx_0</value>
+      <value>blks2_nbfm_tx_0</value>
     </param>
     <param>
       <key>_enabled</key>
@@ -290,7 +251,7 @@
     </param>
     <param>
       <key>audio_rate</key>
-      <value>int(samp_rate/2)</value>
+      <value>int(48e3)</value>
     </param>
     <param>
       <key>quad_rate</key>
@@ -305,16 +266,39 @@
       <value>5e3</value>
     </param>
     <param>
-      <key>affinity</key>
-      <value></value>
+      <key>_coordinate</key>
+      <value>(682, 73)</value>
     </param>
     <param>
-      <key>minoutbuf</key>
+      <key>_rotation</key>
       <value>0</value>
+    </param>
+  </block>
+  <block>
+    <key>blocks_wavfile_source</key>
+    <param>
+      <key>id</key>
+      <value>blocks_wavfile_source_0</value>
+    </param>
+    <param>
+      <key>_enabled</key>
+      <value>True</value>
+    </param>
+    <param>
+      <key>file</key>
+      <value>/home/rtucker/Dropbox/tmp/w2xh_id.wav</value>
+    </param>
+    <param>
+      <key>repeat</key>
+      <value>True</value>
+    </param>
+    <param>
+      <key>nchan</key>
+      <value>1</value>
     </param>
     <param>
       <key>_coordinate</key>
-      <value>(718, 46)</value>
+      <value>(393, 62)</value>
     </param>
     <param>
       <key>_rotation</key>
@@ -352,14 +336,6 @@
       <value>samp_rate</value>
     </param>
     <param>
-      <key>affinity</key>
-      <value></value>
-    </param>
-    <param>
-      <key>minoutbuf</key>
-      <value>0</value>
-    </param>
-    <param>
       <key>_coordinate</key>
       <value>(397, 261)</value>
     </param>
@@ -369,10 +345,101 @@
     </param>
   </block>
   <block>
-    <key>osmosdr_sink</key>
+    <key>wxgui_fftsink2</key>
     <param>
       <key>id</key>
-      <value>osmosdr_sink_0</value>
+      <value>wxgui_fftsink2_0</value>
+    </param>
+    <param>
+      <key>_enabled</key>
+      <value>True</value>
+    </param>
+    <param>
+      <key>type</key>
+      <value>complex</value>
+    </param>
+    <param>
+      <key>title</key>
+      <value>FFT Plot</value>
+    </param>
+    <param>
+      <key>samp_rate</key>
+      <value>samp_rate</value>
+    </param>
+    <param>
+      <key>baseband_freq</key>
+      <value>0</value>
+    </param>
+    <param>
+      <key>y_per_div</key>
+      <value>10</value>
+    </param>
+    <param>
+      <key>y_divs</key>
+      <value>10</value>
+    </param>
+    <param>
+      <key>ref_level</key>
+      <value>0</value>
+    </param>
+    <param>
+      <key>ref_scale</key>
+      <value>2.0</value>
+    </param>
+    <param>
+      <key>fft_size</key>
+      <value>1024</value>
+    </param>
+    <param>
+      <key>fft_rate</key>
+      <value>15</value>
+    </param>
+    <param>
+      <key>peak_hold</key>
+      <value>False</value>
+    </param>
+    <param>
+      <key>average</key>
+      <value>False</value>
+    </param>
+    <param>
+      <key>avg_alpha</key>
+      <value>0</value>
+    </param>
+    <param>
+      <key>win</key>
+      <value>None</value>
+    </param>
+    <param>
+      <key>win_size</key>
+      <value></value>
+    </param>
+    <param>
+      <key>grid_pos</key>
+      <value></value>
+    </param>
+    <param>
+      <key>notebook</key>
+      <value></value>
+    </param>
+    <param>
+      <key>freqvar</key>
+      <value>None</value>
+    </param>
+    <param>
+      <key>_coordinate</key>
+      <value>(985, 129)</value>
+    </param>
+    <param>
+      <key>_rotation</key>
+      <value>0</value>
+    </param>
+  </block>
+  <block>
+    <key>osmosdr_sink_c</key>
+    <param>
+      <key>id</key>
+      <value>osmosdr_sink_c_0</value>
     </param>
     <param>
       <key>_enabled</key>
@@ -384,7 +451,7 @@
     </param>
     <param>
       <key>args</key>
-      <value>bladerf=0,fpga=/tmp/hostedx115.rbf</value>
+      <value>bladerf=0</value>
     </param>
     <param>
       <key>nchan</key>
@@ -404,11 +471,11 @@
     </param>
     <param>
       <key>gain0</key>
-      <value>10</value>
+      <value>6</value>
     </param>
     <param>
       <key>if_gain0</key>
-      <value>20</value>
+      <value>10</value>
     </param>
     <param>
       <key>bb_gain0</key>
@@ -420,7 +487,7 @@
     </param>
     <param>
       <key>bw0</key>
-      <value>0</value>
+      <value>1.5e6</value>
     </param>
     <param>
       <key>freq1</key>
@@ -535,12 +602,8 @@
       <value>0</value>
     </param>
     <param>
-      <key>affinity</key>
-      <value></value>
-    </param>
-    <param>
       <key>_coordinate</key>
-      <value>(873, 237)</value>
+      <value>(790, 336)</value>
     </param>
     <param>
       <key>_rotation</key>
@@ -548,20 +611,26 @@
     </param>
   </block>
   <connection>
-    <source_block_id>analog_nbfm_tx_0</source_block_id>
+    <source_block_id>freq_xlating_fir_filter_xxx_0</source_block_id>
+    <sink_block_id>osmosdr_sink_c_0</sink_block_id>
+    <source_key>0</source_key>
+    <sink_key>0</sink_key>
+  </connection>
+  <connection>
+    <source_block_id>blocks_wavfile_source_0</source_block_id>
+    <sink_block_id>blks2_nbfm_tx_0</sink_block_id>
+    <source_key>0</source_key>
+    <sink_key>0</sink_key>
+  </connection>
+  <connection>
+    <source_block_id>blks2_nbfm_tx_0</source_block_id>
     <sink_block_id>freq_xlating_fir_filter_xxx_0</sink_block_id>
     <source_key>0</source_key>
     <sink_key>0</sink_key>
   </connection>
   <connection>
     <source_block_id>freq_xlating_fir_filter_xxx_0</source_block_id>
-    <sink_block_id>osmosdr_sink_0</sink_block_id>
-    <source_key>0</source_key>
-    <sink_key>0</sink_key>
-  </connection>
-  <connection>
-    <source_block_id>blocks_wavfile_source_0</source_block_id>
-    <sink_block_id>analog_nbfm_tx_0</sink_block_id>
+    <sink_block_id>wxgui_fftsink2_0</sink_block_id>
     <source_key>0</source_key>
     <sink_key>0</sink_key>
   </connection>
