@@ -169,6 +169,12 @@ static int handle_args(int argc, char *argv[], struct repeater_config *config)
         opt = getopt_long(argc, argv, "d:", long_options, &opt_idx);
     }
 
+    if (config->samples_per_buffer < 1024 ||
+        config->samples_per_buffer % 1024 != 0) {
+        fprintf(stderr, "# samples must be >= 1024 and a multiple of 1024\n");
+        return -1;
+    }
+
     return 0;
 }
 
