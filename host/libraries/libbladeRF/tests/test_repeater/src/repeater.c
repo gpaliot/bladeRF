@@ -6,6 +6,18 @@
 
 #include "repeater.h"
 
+struct buf_mgmt
+{
+    void *rx;           /* Next buffer to RX into */
+    void *tx;           /* Next buffer to TX from */
+    size_t num_filled;  /* Number of buffers filled with RX data awaiting TX */
+
+    pthread_mutex_t lock;
+
+    /* Used to signal the TX thread when a few samplse have been buffered up */
+    pthread_cond_t  samples_available;
+}
+
 struct repeater
 {
     struct bladerf *device;
@@ -17,7 +29,8 @@ struct repeater
     struct bladerf_stream *tx_stream;
 
     void **buffers;
-    pthread_mutex_t *buffers_lock;
+    void *buffer_end
+    struct buf_mgmt buffers_mgmt;
 };
 
 void repeater_config_init(struct repeater_config *c)
@@ -64,6 +77,7 @@ static void *rx_stream_callback(struct bladerf *dev,
 static inline void repeater_init(struct repeater *repeater)
 {
     memset(repeater, 0, sizeof(*repeater));
+    pthread_mutex_init(&repeater->buffers_mgmt.lock);
 }
 
 static int init_device(struct repeater *repeater, struct repeater_config *config)
