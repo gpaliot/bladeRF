@@ -64,12 +64,38 @@ static void *tx_stream_callback(struct bladerf *dev,
     return NULL;
 }
 
+void * tx_task(void *repeater_)
+{
+    struct repeater *repeater = repeater_;
+    const size_t prefill_count = 4; /* FIXME determine based on num bufs */
+
+    /* Wait until the RX task has prefilled our buffer a bit */
+    pthread_mutex_lock(&repeater->buffers_mgmt.lock);
+    while(repeater->buffers_mgmt.num_filled < prefill_count) {
+        pthread_cond_wait(&repeater->buffers_mgmt.samples_available,
+                          &repeater->buffers_mgmt.lock);
+
+    }
+    pthread_mutex_unlock(&repeater->buffers_mgmt.lock);
+
+    /* Call stream */
+
+    return NULL;
+}
+
 static void *rx_stream_callback(struct bladerf *dev,
                                 struct bladerf_stream *stream,
                                 struct bladerf_metadata *meta,
                                 void *samples,
                                 size_t num_samples,
                                 void *user_data)
+{
+
+    /* Notify TX stream using samples_available when add any samples */
+    return NULL;
+}
+
+void * rx_task(void *repeater_)
 {
     return NULL;
 }
@@ -78,6 +104,7 @@ static inline void repeater_init(struct repeater *repeater)
 {
     memset(repeater, 0, sizeof(*repeater));
     pthread_mutex_init(&repeater->buffers_mgmt.lock);
+    pthread_cond_init(&repeater->buffers_mgmt.samples_available);
 }
 
 static int init_device(struct repeater *repeater, struct repeater_config *config)
