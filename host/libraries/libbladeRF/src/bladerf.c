@@ -107,17 +107,17 @@ int bladerf_open(struct bladerf **device, const char *dev_id)
         if (!dev->legacy) {
 
             status = bladerf_get_and_cache_serial(dev);
-            if (!status) {
+            if (status < 0) {
                 bladerf_log_warning( "Could not extract serial number\n" ) ;
             }
 
             status = bladerf_get_and_cache_vctcxo_trim(dev);
-            if (!status) {
+            if (status < 0) {
                 bladerf_log_warning( "Could not extract VCTCXO trim value\n" ) ;
             }
 
             status = bladerf_get_and_cache_fpga_size(dev);
-            if (!status) {
+            if (status < 0) {
                 bladerf_log_warning( "Could not extract FPGA size\n" ) ;
             }
 
@@ -130,7 +130,7 @@ int bladerf_open(struct bladerf **device, const char *dev_id)
         } else {
             printf("********************************************************************************\n");
             printf("* ENTERING LEGACY MODE, PLEASE UPGRADE TO THE LATEST FIRMWARE BY RUNNING:\n");
-            printf("* wget http://nuand.com/fx3/latest.img ; bladeRF-cli -b -f latest.img\n");
+            printf("* wget http://nuand.com/fx3/latest.img ; bladeRF-cli -f latest.img\n");
             printf("********************************************************************************\n");
         }
 
@@ -391,6 +391,22 @@ int bladerf_get_bandwidth(struct bladerf *dev, bladerf_module module,
     /* TODO: Make return values for lms call and return it for failure */
     lms_bw_t bw = lms_get_bandwidth( dev, module );
     *bandwidth = lms_bw2uint(bw);
+    return 0;
+}
+
+int bladerf_set_lpf_mode(struct bladerf *dev, bladerf_module module,
+                         bladerf_lpf_mode mode)
+{
+    /* TODO: Make return values for lms call and return it for failure */
+    lms_lpf_set_mode( dev, module, mode );
+    return 0;
+}
+
+int bladerf_get_lpf_mode(struct bladerf *dev, bladerf_module module,
+                         bladerf_lpf_mode *mode)
+{
+    /* TODO: Make return values for lms call and return it for failure */
+    lms_lpf_get_mode( dev, module, mode );
     return 0;
 }
 

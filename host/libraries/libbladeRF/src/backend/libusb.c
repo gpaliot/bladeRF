@@ -246,6 +246,7 @@ static int lusb_open(struct bladerf **device, struct bladerf_devinfo *info)
     struct bladerf_lusb *lusb = NULL;
     libusb_device **list;
     struct bladerf_devinfo thisinfo;
+    const struct libusb_version *version;
 
     libusb_context *context;
 
@@ -258,6 +259,9 @@ static int lusb_open(struct bladerf **device, struct bladerf_devinfo *info)
         status = error_libusb2bladerf(status);
         goto lusb_open_done;
     }
+
+    version = libusb_get_version();
+    bladerf_log_info( "Using libusb version %d.%d.%d.%d\n", version->major, version->minor, version->micro, version->nano );
 
     count = libusb_get_device_list( context, &list );
     /* Iterate through all the USB devices */
@@ -827,6 +831,7 @@ static int lusb_get_fw_version(struct bladerf *dev,
     } else {
         *maj = (unsigned int) LE16_TO_HOST(fw_ver.major);
         *min = (unsigned int) LE16_TO_HOST(fw_ver.minor);
+        status = 0;
     }
 
     return status;
@@ -1054,7 +1059,18 @@ static int lusb_dac_write(struct bladerf *dev, uint16_t value)
     struct uart_cmd cmd;
     struct bladerf_lusb *lusb = dev->backend;
 
-    cmd.word = value;
+    cmd.addr = 0 ;
+    cmd.data = value & 0xff ;
+    status = access_peripheral(lusb, UART_PKT_DEV_VCTCXO,
+                               UART_PKT_MODE_DIR_WRITE, &cmd);
+
+    if (status < 0) {
+        bladerf_set_error(&dev->error, ETYPE_LIBBLADERF, status);
+        return status;
+    }
+
+    cmd.addr = 1 ;
+    cmd.data = (value>>8)&0xff ;
     status = access_peripheral(lusb, UART_PKT_DEV_VCTCXO,
                                UART_PKT_MODE_DIR_WRITE, &cmd);
 
