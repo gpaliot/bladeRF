@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-/* Function visibility */
+/** Marks an API routine to be made visible to dynamic loader  */
 #if defined _WIN32 || defined _CYGWIN__
 #   ifdef __GNUC__
 #       define API_EXPORT __attribute__ ((dllexport))
@@ -66,7 +66,7 @@ typedef enum {
     BLADERF_BACKEND_LIBUSB  /**< libusb */
 } bladerf_backend;
 
-/* Length of device serial number string, including NUL-terminator */
+/** Length of device serial number string, including NUL-terminator */
 #define BLADERF_SERIAL_LENGTH   33
 
 /**
@@ -78,6 +78,16 @@ struct bladerf_devinfo {
     uint8_t usb_bus;            /**< Bus # device is attached to */
     uint8_t usb_addr;           /**< Device address on bus */
     unsigned int instance;      /**< Device instance or ID */
+};
+
+/**
+ * Rational sample rate representation
+ */
+struct bladerf_rational_rate {
+    uint64_t integer;           /**< Integer portion */
+    uint64_t num;               /**< Numerator in fractional portion */
+    uint64_t den;               /**< Denominator in fractional portion. This
+                                     must be > 0. */
 };
 
 /**
@@ -316,7 +326,7 @@ API_EXPORT int bladerf_open_with_devinfo(struct bladerf **device,
  *      - Specifies USB bus and address. Decimal or hex prefixed by '0x' is
  *        permitted.
  *   - instance=\<n\>
- *      - Nth instance encountered (libusb)
+ *      - Nth instance encountered, 0-indexed (libusb)
  *      - Device node N, such as /dev/bladerfN (linux)
  *   - serial=\<serial\>
  *      - Device's serial number.
@@ -390,22 +400,18 @@ API_EXPORT int bladerf_set_sample_rate(struct bladerf *dev, bladerf_module modul
 /**
  * Configure the device's sample rate as a rational fraction of Hz.
  * Sample rates are in the form of integer + num/denom.
- * TODO: Should this be the only way we set values, and num=0 and denom=1
- * for integer portions?
  *
  * @param[in]   dev         Device handle
  * @param[in]   module      Module to change
- * @param[in]   integer     Integer portion of the equation integer + num/denom
- * @param[in]   num         Numerator of rational fractional part
- * @param[in]   denom       Denominator of rational fractional part
+ * @param[in]   rate        Rational sample rate
+ * @param[out]  actual      Actual rational sample rate
  *
  * @return 0 on success, value from \ref RETCODES list on failure
  */
 API_EXPORT int bladerf_set_rational_sample_rate(struct bladerf *dev,
                                                 bladerf_module module,
-                                                unsigned int integer,
-                                                unsigned int num,
-                                                unsigned int denom);
+                                                struct bladerf_rational_rate *rate,
+                                                struct bladerf_rational_rate *actual);
 
 /**
  * Configure the sampling of the LMS6002D to be either internal or
@@ -445,6 +451,19 @@ API_EXPORT int bladerf_get_sampling(struct bladerf *dev,
 API_EXPORT int bladerf_get_sample_rate(struct bladerf *dev,
                                        bladerf_module module,
                                        unsigned int *rate);
+
+/**
+ * Read the device's sample rate in rational Hz
+ *
+ * @param[in]   dev         Device handle
+ * @param[in]   module      Module to query
+ * @param[out]  rate        Pointer to returned rational sample rate
+ *
+ * @return 0 on success, value from \ref RETCODES list upon failure
+ */
+API_EXPORT int bladerf_get_rational_sample_rate(struct bladerf *dev,
+                                                bladerf_module module,
+                                                struct bladerf_rational_rate *rate);
 
 /**
  * Set the PA gain in dB
@@ -684,6 +703,21 @@ API_EXPORT int bladerf_init_stream(struct bladerf_stream **stream,
 /**
  * Begin running  a stream. This call will block until the steam completes.
  *
+ * Only 1 RX stream and 1 TX stream may be running at a time. Attempting to
+ * call bladerf_stream() with more than one stream per module will yield
+ * unexpected (and most likely undesirable) results.
+ *
+ * When running a full-duplex configuration with two threads (e.g,
+ * one thread calling bladerf_stream() for TX, and another for RX), stream
+ * callbacks may be executed in either thread. Therefore, the caller is
+ * responsible for ensuring that his or her callbacks are thread-safe. For the
+ * same reason, it is highly recommended that callbacks do not block.
+ *
+ * When starting a TX stream, an initial set of callbacks will be immediately
+ * invoked. The caller must ensure that there are at *more than* T buffers
+ * filled before calling bladerf_stream(..., BLADERF_MODULE_TX), where T is the
+ * num_transfers value provided to bladerf_init_stream(), to avoid an underrun.
+ *
  * @param   stream  A stream handle that has been successfully been initialized
  *                  via bladerf_init_stream()
  *
@@ -857,6 +891,104 @@ API_EXPORT int bladerf_flash_firmware(struct bladerf *dev,
                                       const char *firmware);
 
 /**
+ * Recover specified device using a device identifier string
+ *
+ * This method recovers a bladeRF that is in the FX3 bootloader by loading the
+ * specified firmware image.
+ *
+ * The general form of the device identifier string is;
+ * @code
+ *      <backend>:[device=<bus>:<addr>] [instance=<n>] [serial=<serial>]
+ * @endcode
+ *
+ * An empty ("") or NULL device identifier will result in the first
+ * encountered device being opened (using the first discovered backend)
+ *
+ * The 'backend' describes the mechanism used to communicate with the device,
+ * and may be one of the following:
+ *   - libusb:  libusb (See libusb changelog notes for required version, given
+ *   your OS and controller)
+ *   - linux:   Linux Kernel Driver
+ *
+ * If no arguments are provided after the backend, the first encountered
+ * device on the specified backend will be opened. Note that a backend is
+ * required, if any arguments are to be provided.
+ *
+ * Next, any provided arguments are provide as used to find the desired device.
+ * Be sure not to over constrain the search. Generally, only one of the above
+ * is required -- providing all of these may over constrain the search for the
+ * desired device (e.g., if a serial number matches, but not on the specified
+ * bus and address.)
+ *
+ *   - device=\<bus\>:\<addr\>
+ *      - Specifies USB bus and address. Decimal or hex prefixed by '0x' is
+ *        permitted.
+ *   - instance=\<n\>
+ *      - Nth instance encountered (libusb)
+ *      - Device node N, such as /dev/bladerfN (linux)
+ *   - serial=\<serial\>
+ *      - Device's serial number.
+ *
+ * @param[in]   device_identifier  Device identifier, formatted as described above
+ * @param[in]   fname              Filename of FX3 firmware load work
+ *
+ * @return 0 on success, or value from \ref RETCODES list on failure
+ */
+API_EXPORT int bladerf_recover_with_devinfo(
+        struct bladerf_devinfo *devinfo,
+        const char *fname
+        );
+API_EXPORT int bladerf_recover(
+        const char *device_identifier,
+        const char *fname
+        );
+
+/**
+ * Erase pages from FX3 flash device
+ *
+ * @note Only entire pages are erased
+ *
+ * @param   dev         Device handle
+ * @param   page_offset Page offset to begin erasing
+ * @param   n_bytes     Number of bytes to erase
+ *
+ * @return Number of pages erased on success, value from \ref RETCODES list on
+ *         failure
+ */
+API_EXPORT int bladerf_erase_flash(struct bladerf *dev, int page_offset,
+                        int n_bytes);
+
+/**
+ * Read bytes from FX3 flash device
+ *
+ * @param   dev         Device handle
+ * @param   page_offset Page offset to begin reading
+ * @param   ptr         Buffer to read into, must be n_bytes long
+ * @param   n_bytes     Number of bytes to read
+ *
+ * @return Number of bytes read on success, value from \ref RETCODES list on
+ *         failure
+ */
+API_EXPORT int bladerf_read_flash(struct bladerf *dev, int page_offset,
+                        uint8_t *ptr, size_t n_bytes);
+
+/**
+ * Write bytes to FX3 flash device
+ *
+ * @note Only write erased pages
+ *
+ * @param   dev         Device handle
+ * @param   page_offset Page offset to begin writing
+ * @param   data        Data to write to flash
+ * @param   data_size   Number of bytes to write
+ *
+ * @return Number of bytes written on success, value from \ref RETCODES list
+ *         on failure
+ */
+API_EXPORT int bladerf_write_flash(struct bladerf *dev, int page_offset,
+                        uint8_t *data, size_t data_size);
+
+/**
  * Reset the device
  *
  * @note This also causes the device to reload its firmware
@@ -868,14 +1000,23 @@ API_EXPORT int bladerf_flash_firmware(struct bladerf *dev,
 API_EXPORT int bladerf_device_reset(struct bladerf *dev);
 
 /**
+ * Jump to FX3 bootloader
+ *
+ * @note This also causes the device to jump to the FX3 bootloader
+ *
+ * @param   dev         Device handle
+ *
+ * @return 0 on success, value from \ref RETCODES list on failure
+ */
+API_EXPORT int bladerf_jump_to_bootloader(struct bladerf *dev);
+
+/**
  * Load device's FPGA
  *
  * @param   dev         Device handle
  * @param   fpga        Full path to FPGA bitstream
  *
- * @return 0 upon successfully,
- *         1 if FPGA is already loaded,
- *         or a value from \ref RETCODES list on failure
+ * @return 0 upon successfully, or a value from \ref RETCODES list on failure
  */
 API_EXPORT int bladerf_load_fpga(struct bladerf *dev, const char *fpga);
 

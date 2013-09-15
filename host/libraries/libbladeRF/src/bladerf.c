@@ -160,15 +160,19 @@ int bladerf_set_loopback(struct bladerf *dev, bladerf_loopback l)
 }
 
 
-int bladerf_set_rational_sample_rate(struct bladerf *dev, bladerf_module module, unsigned int integer, unsigned int num, unsigned int denom)
+int bladerf_set_rational_sample_rate(struct bladerf *dev, bladerf_module module, struct bladerf_rational_rate *rate, struct bladerf_rational_rate *actual)
 {
-    /* TODO: Program the Si5338 to be 2x the desired sample rate */
-    return 0;
+    return si5338_set_rational_sample_rate(dev, module, rate, actual);
 }
 
 int bladerf_set_sample_rate(struct bladerf *dev, bladerf_module module, uint32_t rate, uint32_t *actual)
 {
     return si5338_set_sample_rate(dev, module, rate, actual);
+}
+
+int bladerf_get_rational_sample_rate(struct bladerf *dev, bladerf_module module, struct bladerf_rational_rate *rate)
+{
+    return si5338_get_rational_sample_rate(dev, module, rate);
 }
 
 int bladerf_get_sample_rate(struct bladerf *dev, bladerf_module module, unsigned int *rate)
@@ -268,12 +272,6 @@ int bladerf_set_sampling(struct bladerf *dev, bladerf_sampling sampling)
 
 bladerf_set_sampling__done:
     return status;
-}
-
-int bladerf_get_rational_sample_rate(struct bladerf *dev, bladerf_module module, unsigned int integer, unsigned int num, unsigned int denom)
-{
-    /* TODO: Read the Si5338 and figure out the sample rate */
-    return 0;
 }
 
 int bladerf_set_txvga2(struct bladerf *dev, int gain)
@@ -662,6 +660,35 @@ int bladerf_stats(struct bladerf *dev, struct bladerf_stats *stats)
 /*------------------------------------------------------------------------------
  * Device Programming
  *----------------------------------------------------------------------------*/
+int bladerf_recover_with_devinfo(
+        struct bladerf_devinfo *devinfo,
+        const char *fname
+        )
+{
+    const struct bladerf_fn * fn = backend_getfns(devinfo->backend);
+
+    if (!fn->recover) {
+        return BLADERF_ERR_UNSUPPORTED;
+    }
+
+    return fn->recover(devinfo, fname);
+}
+
+int bladerf_recover(
+        const char *dev_id,
+        const char *fname
+        )
+{
+    struct bladerf_devinfo devinfo;
+    int status = str2devinfo(dev_id, &devinfo);
+
+    if (!status) {
+        status = bladerf_recover_with_devinfo(&devinfo, fname);
+    }
+
+    return status;
+}
+
 int bladerf_flash_firmware(struct bladerf *dev, const char *firmware_file)
 {
     int status;
@@ -698,7 +725,7 @@ int bladerf_flash_firmware(struct bladerf *dev, const char *firmware_file)
             }
 
             if (!status) {
-                status = dev->fn->flash_firmware(dev, buf, buf_size);
+                status = dev->fn->flash_firmware(dev, buf, buf_size_padded);
             }
             if (!status) {
                 if (dev->legacy) {
@@ -713,9 +740,48 @@ int bladerf_flash_firmware(struct bladerf *dev, const char *firmware_file)
     return status;
 }
 
+int bladerf_erase_flash(struct bladerf *dev, int page_offset,
+                        int n_bytes)
+{
+    if (!dev->fn->erase_flash) {
+        return BLADERF_ERR_UNSUPPORTED;
+    }
+
+    return dev->fn->erase_flash(dev, page_offset, n_bytes);
+}
+
+int bladerf_read_flash(struct bladerf *dev, int page_offset,
+                        uint8_t *ptr, size_t n_bytes)
+{
+    if (!dev->fn->read_flash) {
+        return BLADERF_ERR_UNSUPPORTED;
+    }
+
+    return dev->fn->read_flash(dev, page_offset, ptr, n_bytes);
+}
+
+int bladerf_write_flash(struct bladerf *dev, int page_offset,
+                        uint8_t *data, size_t data_size)
+{
+    if (!dev->fn->write_flash) {
+        return BLADERF_ERR_UNSUPPORTED;
+    }
+
+    return dev->fn->write_flash(dev, page_offset, data, data_size);
+}
+
 int bladerf_device_reset(struct bladerf *dev)
 {
     return dev->fn->device_reset(dev);
+}
+
+int bladerf_jump_to_bootloader(struct bladerf *dev)
+{
+    if (!dev->fn->jump_to_bootloader) {
+        return BLADERF_ERR_UNSUPPORTED;
+    }
+
+    return dev->fn->jump_to_bootloader(dev);
 }
 
 int bladerf_load_fpga(struct bladerf *dev, const char *fpga_file)
@@ -723,15 +789,6 @@ int bladerf_load_fpga(struct bladerf *dev, const char *fpga_file)
     uint8_t *buf;
     size_t  buf_size;
     int status;
-    int is_loaded;
-
-    is_loaded = dev->fn->is_fpga_configured(dev);
-    if (is_loaded > 0) {
-        log_info("FPGA is already loaded -- reloading.\n");
-    } else if (is_loaded < 0) {
-        log_warning("Failed to determine FPGA status. (%d) "
-                    "Attempting to load anyway...\n", is_loaded);
-    }
 
     /* TODO sanity check FPGA:
      *  - Check for x40 vs x115 and verify FPGA image size
