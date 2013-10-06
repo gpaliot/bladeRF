@@ -229,6 +229,8 @@ static int flash_fw(struct rc_config *rc, struct cli_state *state, int status)
                 printf("Done.\n");
             }
             bladerf_device_reset(state->dev);
+            bladerf_close(state->dev);
+            state->dev = NULL;
         }
     }
 
@@ -316,7 +318,9 @@ int main(int argc, char *argv[])
         printf(BLADERF_CLI_VERSION "\n");
         exit_immediately = true;
     } else if (rc.show_lib_version) {
-        printf("%s\n", bladerf_version(NULL, NULL, NULL));
+        struct bladerf_version version;
+        bladerf_version(&version);
+        printf("%s\n", version.describe);
         exit_immediately = true;
     } else if (rc.probe) {
         status = cmd_handle(state, "probe");

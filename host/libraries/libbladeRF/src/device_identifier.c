@@ -5,12 +5,12 @@
 #include <stdint.h>
 #include <libbladeRF.h>
 #include <limits.h>
-#include <assert.h>
+#include "rel_assert.h"
 #include <stdbool.h>
 #include <stdint.h>
 
 #include "device_identifier.h"
-#include "bladerf_devinfo.h"
+#include "devinfo.h"
 #include "conversions.h"
 #include "log.h"
 

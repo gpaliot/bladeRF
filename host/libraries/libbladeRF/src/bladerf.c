@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <limits.h>
-#include <assert.h>
+#include "rel_assert.h"
 
 #include "libbladeRF.h"     /* Public API */
 #include "bladerf_priv.h"   /* Implementation-specific items ("private") */
@@ -32,7 +32,7 @@ int bladerf_get_device_list(struct bladerf_devinfo **devices)
         ret = status;
     } else {
         assert(num_devices <= INT_MAX);
-        ret = num_devices;
+        ret = (int)num_devices;
         *devices = devices_local;
     }
 
@@ -103,13 +103,22 @@ int bladerf_open(struct bladerf **device, const char *dev_id)
         dev = *device;
     }
 
-    if (!status) {
-        if (!dev->legacy) {
 
-            status = bladerf_get_and_cache_serial(dev);
-            if (status < 0) {
-                log_warning( "Could not extract serial number\n" ) ;
-            }
+    if (!status) {
+        if (dev->legacy) {
+            /* Currently two modes of legacy:
+             *  - ALT_SETTING
+             *  - CONFIG_IF
+             *
+             * If either of these are set, we should tell the user to update
+             */
+            printf("********************************************************************************\n");
+            printf("* ENTERING LEGACY MODE, PLEASE UPGRADE TO THE LATEST FIRMWARE BY RUNNING:\n");
+            printf("* wget http://nuand.com/fx3/latest.img ; bladeRF-cli -f latest.img\n");
+            printf("********************************************************************************\n");
+        }
+
+        if (!(dev->legacy & LEGACY_ALT_SETTING)) {
 
             status = bladerf_get_and_cache_vctcxo_trim(dev);
             if (status < 0) {
@@ -124,14 +133,9 @@ int bladerf_open(struct bladerf **device, const char *dev_id)
             /* If any of these routines failed, the dev structure should
              * still have had it's fields dummied, so they're safe to
              * print here (i.e., not uninitialized) */
-            log_debug("%s: fw=v%d.%d serial=%s trim=0x%.4x fpga_size=%d\n",
-                    __FUNCTION__, dev->fw_major, dev->fw_minor,
-                    dev->serial, dev->dac_trim, dev->fpga_size);
-        } else {
-            printf("********************************************************************************\n");
-            printf("* ENTERING LEGACY MODE, PLEASE UPGRADE TO THE LATEST FIRMWARE BY RUNNING:\n");
-            printf("* wget http://nuand.com/fx3/latest.img ; bladeRF-cli -f latest.img\n");
-            printf("********************************************************************************\n");
+            log_debug("%s: fw=v%s serial=%s trim=0x%.4x fpga_size=%d\n",
+                    __FUNCTION__, dev->fw_version.describe,
+                    dev->ident.serial, dev->dac_trim, dev->fpga_size);
         }
 
         /* All status in here is not fatal, so whatever */
@@ -413,12 +417,21 @@ int bladerf_select_band(struct bladerf *dev, bladerf_module module,
 {
     uint32_t gpio ;
     uint32_t band = 0;
+    lms_lna_t lna ;
+    lms_pa_t pa ;
     if( frequency >= 1500000000 ) {
         band = 1; // High Band selection
-        lms_lna_select(dev, LNA_2);
+        lna = LNA_2;
+        pa = PA_2;
     } else {
         band = 2; // Low Band selection
-        lms_lna_select(dev, LNA_1);
+        lna = LNA_1;
+        pa = PA_1;
+    }
+    if (module == BLADERF_MODULE_TX) {
+        lms_pa_enable(dev, pa);
+    } else {
+        lms_lna_select(dev, lna);
     }
     bladerf_config_gpio_read(dev, &gpio);
     gpio &= ~(module == BLADERF_MODULE_TX ? (3<<3) : (3<<5));
@@ -574,7 +587,6 @@ int bladerf_init_stream(struct bladerf_stream **stream,
 
 void bladerf_deinit_stream(struct bladerf_stream *stream)
 {
-
     size_t i;
 
     while(stream->state != STREAM_DONE && stream->state != STREAM_IDLE) {
@@ -619,7 +631,7 @@ int bladerf_stream(struct bladerf_stream *stream, bladerf_module module)
 
 int bladerf_get_serial(struct bladerf *dev, char *serial)
 {
-    strcpy(serial, dev->serial);
+    strcpy(serial, dev->ident.serial);
     return 0;
 }
 
@@ -635,10 +647,9 @@ int bladerf_get_fpga_size(struct bladerf *dev, bladerf_fpga_size *size)
     return 0;
 }
 
-int bladerf_get_fw_version(struct bladerf *dev,
-                            unsigned int *major, unsigned int *minor)
+int bladerf_fw_version(struct bladerf *dev, struct bladerf_version *version)
 {
-    return dev->fn->get_fw_version(dev, major, minor);
+    return dev->fn->fw_version(dev, version);
 }
 
 int bladerf_is_fpga_configured(struct bladerf *dev)
@@ -646,10 +657,9 @@ int bladerf_is_fpga_configured(struct bladerf *dev)
     return dev->fn->is_fpga_configured(dev);
 }
 
-int bladerf_get_fpga_version(struct bladerf *dev,
-                                unsigned int *major, unsigned int *minor)
+int bladerf_fpga_version(struct bladerf *dev, struct bladerf_version *version)
 {
-    return dev->fn->get_fpga_version(dev, major, minor);
+    return dev->fn->fpga_version(dev, version);
 }
 
 int bladerf_stats(struct bladerf *dev, struct bladerf_stats *stats)
@@ -666,6 +676,10 @@ int bladerf_recover_with_devinfo(
         )
 {
     const struct bladerf_fn * fn = backend_getfns(devinfo->backend);
+
+    if (!fn) {
+        return BLADERF_ERR_UNSUPPORTED;
+    }
 
     if (!fn->recover) {
         return BLADERF_ERR_UNSUPPORTED;
@@ -728,7 +742,7 @@ int bladerf_flash_firmware(struct bladerf *dev, const char *firmware_file)
                 status = dev->fn->flash_firmware(dev, buf, buf_size_padded);
             }
             if (!status) {
-                if (dev->legacy) {
+                if (dev->legacy & LEGACY_ALT_SETTING) {
                     printf("DEVICE OPERATING IN LEGACY MODE, MANUAL RESET IS NECESSARY AFTER SUCCESSFUL UPGRADE\n");
                 }
             }
@@ -839,28 +853,77 @@ const char * bladerf_strerror(int error)
     }
 }
 
-const char * bladerf_version(unsigned int *major,
-                             unsigned int *minor,
-                             unsigned int *patch)
+void bladerf_version(struct bladerf_version *version)
 {
-    if (major) {
-        *major = LIBBLADERF_VERSION_MAJOR;
-    }
-
-    if (minor) {
-        *minor = LIBBLADERF_VERSION_MINOR;
-    }
-
-    if (patch) {
-        *patch = LIBBLADERF_VERSION_PATCH;
-    }
-
-    return LIBBLADERF_VERSION;
+    version->major = LIBBLADERF_VERSION_MAJOR;
+    version->minor = LIBBLADERF_VERSION_MINOR;
+    version->patch = LIBBLADERF_VERSION_PATCH;
+    version->describe = LIBBLADERF_VERSION;
 }
 
 bladerf_log_level bladerf_log_set_verbosity(bladerf_log_level level)
 {
     return log_set_verbosity(level);
+}
+
+/*------------------------------------------------------------------------------
+ * Device identifier information
+ *----------------------------------------------------------------------------*/
+
+void bladerf_init_devinfo(struct bladerf_devinfo *info)
+{
+    info->backend  = BLADERF_BACKEND_ANY;
+
+    memset(info->serial, 0, BLADERF_SERIAL_LENGTH);
+    strncpy(info->serial, DEVINFO_SERIAL_ANY, BLADERF_SERIAL_LENGTH - 1);
+
+    info->usb_bus  = DEVINFO_BUS_ANY;
+    info->usb_addr = DEVINFO_ADDR_ANY;
+    info->instance = DEVINFO_INST_ANY;
+}
+
+int bladerf_get_devinfo(struct bladerf *dev, struct bladerf_devinfo *info)
+{
+    if (dev) {
+        memcpy(info, &dev->ident, sizeof(struct bladerf_devinfo));
+        return 0;
+    } else {
+        return BLADERF_ERR_INVAL;
+    }
+}
+
+int bladerf_get_devinfo_from_str(const char *devstr,
+                                 struct bladerf_devinfo *info)
+{
+    return str2devinfo(devstr, info);
+}
+
+bool bladerf_devinfo_matches(const struct bladerf_devinfo *a,
+                             const struct bladerf_devinfo *b)
+{
+    return bladerf_instance_matches(a, b) &&
+           bladerf_serial_matches(a, b)   &&
+           bladerf_bus_addr_matches(a ,b);
+}
+
+
+bool bladerf_devstr_matches(const char *dev_str,
+                            struct bladerf_devinfo *info)
+{
+    int status;
+    bool ret;
+    struct bladerf_devinfo from_str;
+
+    status = str2devinfo(dev_str, &from_str);
+    if (status < 0) {
+        ret = false;
+        log_error("Failed to parse device string: %s\n",
+                  bladerf_strerror(status));
+    } else {
+        ret = bladerf_devinfo_matches(&from_str, info);
+    }
+
+    return ret;
 }
 
 /*------------------------------------------------------------------------------

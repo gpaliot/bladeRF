@@ -1,9 +1,11 @@
 #ifndef _INCLUDED_BLADE_H_
 #define _INCLUDED_BLADE_H_
 
+#include <stdint.h>
 #include "cyu3externcstart.h"
 #include "cyu3types.h"
 #include "cyu3usbconst.h"
+#include "cyu3dma.h"
 #include "../firmware_common/bladeRF.h"
 
 #define BLADE_GPIF_16_32BIT_CONF_SELECT (0)
@@ -14,7 +16,7 @@
 #define BLADE_THREAD_STACK       (0x0400)
 #define BLADE_THREAD_PRIORITY    (8)
 
-// interface #0
+// interface #3
 #define BLADE_FPGA_EP_PRODUCER          0x02
 #define BLADE_FPGA_CONFIG_SOCKET        CY_U3P_UIB_SOCKET_PROD_2
 
@@ -46,19 +48,20 @@ extern const uint8_t CyFxUSBProductDscr[];
 
 #include "cyu3externcend.h"
 
-int FpgaBeginProgram(void);
-void NuandFirmwareStart(void);
-void NuandFirmwareStop(void);
 CyU3PReturnStatus_t CyFxSpiEraseSector(CyBool_t /* isErase */, uint8_t /* sector */);
-void NuandEnso();
-void NuandExso();
-void NuandLockOtp();
 void NuandGPIOReconfigure(CyBool_t /* fullGpif */, CyBool_t /* warm */);
-int NuandExtractField(char * /* ptr */, int /* len */, char * /* field */, char * /* val */, size_t /* maxlen */);
-
-int FpgaBeginProgram(void);
+void ClearDMAChannel(uint8_t ep, CyU3PDmaChannel * handle, uint32_t count, CyBool_t stall_only);
+void CyFxAppErrorHandler(CyU3PReturnStatus_t apiRetStatus);
+void NuandAllowSuspend(CyBool_t set_allow_suspend);
 
 extern uint32_t glAppMode;
+
+struct NuandApplication {
+    void (*start)(void);
+    void (*stop)(void);
+    CyBool_t (*halt_endpoint)(CyBool_t set, uint16_t endpoint);
+    CyBool_t (*halted)(uint16_t endpoint, uint8_t *data);
+};
 
 #define GPIO_nSTATUS    52
 #define GPIO_nCONFIG    51

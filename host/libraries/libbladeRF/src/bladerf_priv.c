@@ -1,23 +1,23 @@
-#include <assert.h>
+#include "rel_assert.h"
 #include <string.h>
 #include <libbladeRF.h>
 #include <stddef.h>
 
 #include "bladerf_priv.h"
+#include "bladeRF.h"
 #include "log.h"
 
 #define OTP_BUFFER_SIZE 256
-#define CAL_BUFFER_SIZE 256
 
 void bladerf_set_error(struct bladerf_error *error,
-                        bladerf_error type, int val)
+                        bladerf_error_type type, int val)
 {
     error->type = type;
     error->value = val;
 }
 
 void bladerf_get_error(struct bladerf_error *error,
-                        bladerf_error *type, int *val)
+                        bladerf_error_type *type, int *val)
 {
     if (type) {
         *type = error->type;
@@ -109,10 +109,10 @@ static word crc16mp(word crcval, void *data_p, word count) {
 
 static int extract_field(char *ptr, int len, char *field,
                             char *val, size_t  maxlen) {
-    int c, wlen;
+    int c;
     unsigned char *ub, *end;
     unsigned short a1, a2;
-    int flen;
+    size_t flen, wlen;
 
     flen = strlen(field);
 
@@ -150,6 +150,8 @@ int bladerf_get_otp_field(struct bladerf *dev, char *field,
     int status;
     char otp[OTP_BUFFER_SIZE];
 
+    memset(otp, 0xff, OTP_BUFFER_SIZE);
+
     status = dev->fn->get_otp(dev, otp);
     if (status < 0)
         return status;
@@ -170,16 +172,22 @@ int bladerf_get_cal_field(struct bladerf *dev, char *field,
         return extract_field(cal, CAL_BUFFER_SIZE, field, data, data_size);
 }
 
-int bladerf_get_and_cache_serial(struct bladerf *dev)
+int bladerf_read_serial(struct bladerf *dev, char *serial_buf)
 {
     int status;
-    status = bladerf_get_otp_field(dev, "S", dev->serial,
+
+    status = bladerf_get_otp_field(dev, "S", serial_buf,
                                     BLADERF_SERIAL_LENGTH - 1);
 
     if (status < 0) {
-        log_debug("Unable to fetch serial number. Defaulting to 0's\n");
-        memset(dev->serial, 0, BLADERF_SERIAL_LENGTH);
+        log_error("Unable to fetch serial number. Defaulting to 0's.\n");
+        memset(dev->ident.serial, '0', BLADERF_SERIAL_LENGTH - 1);
+
+        /* Treat this as non-fatal */
+        status = 0;
     }
+
+    serial_buf[BLADERF_SERIAL_LENGTH - 1] = '\0';
 
     return status;
 }

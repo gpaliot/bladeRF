@@ -8,7 +8,7 @@
 # the CMakeLists.txt from the rtl-sdr project.
 #   http://sdr.osmocom.org/trac/wiki/rtl-sdr
 
-cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 2.8.3)
 project(bladeRF C)
 
 ################################################################################
@@ -108,8 +108,7 @@ endif("${CMAKE_C_COMPILER_ID}" STREQUAL "GNU" OR
 # MS Visual Studio
 ###############################
 if(MSVC)
-    # Cannot enable /WX on Windows build just yet, lots of warnings
-    #set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /WX")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /WX")
 endif(MSVC)
 
 ################################################################################
@@ -130,6 +129,7 @@ elseif(${CMAKE_SYSTEM_NAME} MATCHES "Windows")
             ${CMAKE_CURRENT_LIST_DIR}/common/include/windows
     )
 
+    add_definitions(-D_CRT_SECURE_NO_WARNINGS)
 else()
     message(FATAL_ERROR "Unsupported host operating system: ${CMAKE_SYSTEM_NAME}")
 endif()

@@ -1,6 +1,8 @@
+#ifndef _BLADERF_FIRMWARE_COMMON_H_
+#define _BLADERF_FIRMWARE_COMMON_H_
 
 #define BLADERF_IOCTL_BASE      'N'
-#define BLADE_QUERY_VERSION     _IOR(BLADERF_IOCTL_BASE, 0, struct bladeRF_version)
+#define BLADE_QUERY_VERSION     _IOR(BLADERF_IOCTL_BASE, 0, struct bladerf_fx3_version)
 #define BLADE_QUERY_FPGA_STATUS     _IOR(BLADERF_IOCTL_BASE, 1, unsigned int)
 #define BLADE_BEGIN_PROG        _IOR(BLADERF_IOCTL_BASE, 2, unsigned int)
 #define BLADE_END_PROG          _IOR(BLADERF_IOCTL_BASE, 3, unsigned int)
@@ -41,17 +43,39 @@
 #define BLADE_USB_CMD_WRITE_OTP               104
 #define BLADE_USB_CMD_RESET                   105
 #define BLADE_USB_CMD_JUMP_TO_BOOTLOADER      106
+#define BLADE_USB_CMD_READ_PAGE_BUFFER        107
+#define BLADE_USB_CMD_WRITE_PAGE_BUFFER       108
+#define BLADE_USB_CMD_LOCK_OTP                109
+#define BLADE_USB_CMD_READ_CAL_CACHE          110
+#define BLADE_USB_CMD_INVALIDATE_CAL_CACHE    111
+#define BLADE_USB_CMD_REFRESH_CAL_CACHE       112
 
-#define BLADE_USB_CMD_QUERY_VERSION      0
-#define BLADE_USB_CMD_QUERY_FPGA_STATUS  1
-#define BLADE_USB_CMD_BEGIN_PROG         2
-#define BLADE_USB_CMD_END_PROG           3
-#define BLADE_USB_CMD_RF_RX              4
+/* String descriptor indices */
+#define BLADE_USB_STR_INDEX_MFR     1   /* Manufacturer */
+#define BLADE_USB_STR_INDEX_PRODUCT 2   /* Product */
+#define BLADE_USB_STR_INDEX_SERIAL  3   /* Serial number */
+#define BLADE_USB_STR_INDEX_FW_VER  4   /* Firmware version */
 
-struct bladeRF_version {
+#define CAL_BUFFER_SIZE 256
+#define CAL_PAGE 768
+
+#ifdef _MSC_VER
+#   define PACK(decl_to_pack_) \
+            __pragma(pack(push,1)) \
+            decl_to_pack_ \
+            __pragma(pack(pop))
+#elif defined(__GNUC__)
+#   define PACK(decl_to_pack_) \
+            decl_to_pack_ __attribute__((__packed__))
+#else
+#error "Unexpected compiler/environment"
+#endif
+
+PACK(
+struct bladerf_fx3_version {
     unsigned short major;
     unsigned short minor;
-};
+});
 
 struct bladeRF_firmware {
     unsigned int len;
@@ -111,3 +135,12 @@ struct uart_cmd {
         unsigned short word;
     };
 };
+
+/* Interface numbers */
+#define USB_IF_LEGACY_CONFIG    0
+#define USB_IF_NULL             0
+#define USB_IF_RF_LINK          1
+#define USB_IF_SPI_FLASH        2
+#define USB_IF_CONFIG           3
+
+#endif /* _BLADERF_FIRMWARE_COMMON_H_ */

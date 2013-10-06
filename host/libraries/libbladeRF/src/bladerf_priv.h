@@ -9,7 +9,7 @@
 #include "host_config.h"
 #include "minmax.h"
 #include "conversions.h"
-#include "bladerf_devinfo.h"
+#include "devinfo.h"
 
 /* MX25U3235 - 32Mbit flash w/ 4KiB sectors */
 #define FLASH_SECTOR_SIZE   0x10000
@@ -19,20 +19,15 @@
 #define FLASH_NUM_SECTORS   4096
 #define FLASH_NUM_PAGES     (FLASH_NUM_SECTORS * (FLASH_SECTOR_SIZE / FLASH_PAGE_SIZE))
 
-/* Interface numbers */
-#define USB_IF_CONFIG       0
-#define USB_IF_RF_LINK      1
-#define USB_IF_SPI_FLASH    2
-
 typedef enum {
     ETYPE_ERRNO,
     ETYPE_LIBBLADERF,
     ETYPE_BACKEND,
     ETYPE_OTHER = INT_MAX - 1
-} bladerf_error;
+} bladerf_error_type;
 
 struct bladerf_error {
-    bladerf_error type;
+    bladerf_error_type type;
     int value;
 };
 
@@ -75,7 +70,9 @@ struct bladerf_fn {
      * bladerf_devinfo_list_append() */
     int (*probe)(struct bladerf_devinfo_list *info_list);
 
-    /* Opening device based upon specified device info*/
+    /* Opening device based upon specified device info
+     * devinfo structure. The implementation of this function is responsible
+     * for ensuring (*device)->ident is populated */
     int (*open)(struct bladerf **device,  struct bladerf_devinfo *info);
 
     /* Closing of the device and freeing of the data */
@@ -101,8 +98,8 @@ struct bladerf_fn {
     /* Platform information */
     int (*get_cal)(struct bladerf *dev, char *cal);
     int (*get_otp)(struct bladerf *dev, char *otp);
-    int (*get_fw_version)(struct bladerf *dev, unsigned int *maj, unsigned int *min);
-    int (*get_fpga_version)(struct bladerf *dev, unsigned int *maj, unsigned int *min);
+    int (*fw_version)(struct bladerf *dev, struct bladerf_version *version);
+    int (*fpga_version)(struct bladerf *dev, struct bladerf_version *version);
     int (*get_device_speed)(struct bladerf *dev, int *speed);
 
     /* Configuration GPIO accessors */
@@ -135,26 +132,33 @@ struct bladerf_fn {
 #define FW_LEGACY_ALT_SETTING_MAJOR 1
 #define FW_LEGACY_ALT_SETTING_MINOR 1
 #define LEGACY_ALT_SETTING  1
+
+#define FW_LEGACY_CONFIG_IF_MAJOR   1
+#define FW_LEGACY_CONFIG_IF_MINOR   4
+#define LEGACY_CONFIG_IF    2
+
+#define BLADERF_VERSION_STR_MAX 32
+
 struct bladerf {
-    char serial[BLADERF_SERIAL_LENGTH]; /* The device's serial number */
+
+    struct bladerf_devinfo ident;  /* Identifying information */
+
     uint16_t dac_trim;
     bladerf_fpga_size fpga_size;
 
-    unsigned int fw_major, fw_minor;
+    char *fw_version_str;
+    char *fpga_version_str;
+
+    struct bladerf_version fw_version;
     int legacy;
 
     int speed;      /* The device's USB speed, 0 is HS, 1 is SS */
     struct bladerf_stats stats;
 
-    /* FIXME temporary workaround for not being able to read back sample rate */
-    unsigned int last_tx_sample_rate;
-    unsigned int last_rx_sample_rate;
-
     /* Last error encountered */
     struct bladerf_error error;
 
-    /* Type of the underlying driver and its private data  */
-    bladerf_backend backend_type;
+    /* Backend's private data  */
     void *backend;
 
     /* Driver-sppecific implementations */
@@ -178,13 +182,13 @@ size_t c16_samples_to_bytes(size_t n_samples);
  * Set an error and type
  */
 void bladerf_set_error(struct bladerf_error *error,
-                        bladerf_error type, int val);
+                        bladerf_error_type type, int val);
 
 /**
  * Fetch an error and type
  */
 void bladerf_get_error(struct bladerf_error *error,
-                        bladerf_error *type, int *val);
+                        bladerf_error_type *type, int *val);
 
 /**
  * Read data from one-time-programmabe (OTP) section of flash
@@ -213,14 +217,15 @@ int bladerf_get_otp_field(struct bladerf *device, char *field,
                             char *data, size_t data_size);
 
 /**
- * Retrieve the device serial from flash and cache it in the provided
- * device structure
+ * Retrieve the device serial from flash and store it in the provided buffer.
+ *
+ * @pre The provided buffer is BLADERF_SERIAL_LENGTH in size
  *
  * @param[inout]   dev      Device handle. On success, serial field is updated
  *
  * 0 on success, BLADERF_ERR_* on failure
  */
-int bladerf_get_and_cache_serial(struct bladerf *device);
+int bladerf_read_serial(struct bladerf *device, char *serial_buf);
 
 /**
  * Retrieve VCTCXO calibration value from flash and cache it in the

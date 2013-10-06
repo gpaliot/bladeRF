@@ -1,7 +1,8 @@
 #-------------------------------------------------------------------------------
 #
 # This file is intended to give credit to all the people who have contributed to
-# the bladeRF project, and doubles as "MAINTAINERS" file.
+# the bladeRF project, and doubles as "MAINTAINERS" file. It also serves to help
+# keep track of who is familiar with various portions of the codebase.
 #
 # For bugs and questions, github, the forum, and IRC should be used. (Please
 # avoid spamming contributors!)
@@ -18,6 +19,7 @@
 #   (I) IRC handle in Freenode/#bladerf
 #   (G) GitHub handle
 #   (D) Description of contributions or project responsibilities
+#   (W) Website
 #
 # Feel free to add multiple fields (e.g., multiple (W) fields - one per site),
 # and omit fields.
@@ -27,7 +29,7 @@
 N: Damiano Bolla
 I: engidea
 G: Engidea
-D: si5338 sample rate readback, misc. bugfixes
+D: si5338 sample rate functionality, misc. bugfixes
 
 N: Robert Ghilduta
 E: robert.ghilduta@nuand.com
@@ -35,6 +37,13 @@ F: robertghilduta
 I: mIKEjONES
 G: robertghilduta
 D: Project maintainer
+
+N: Adam Greig
+E: adam@adamgreig.com
+F: adamgreig
+I: adamgreig
+G: adamgreig
+D: libbladeRF LPF mode routines
 
 N: Mike Kershaw
 E: dragorn@kismetwireless.net
@@ -48,6 +57,13 @@ F: bpadalino
 I: bpadalino
 G: bpadalino
 D: Project maintainer
+
+N: Keith Rothman
+E: litghost@softhome.net
+F: litghost
+I: litghost
+G: litghost
+D: Host and FX3 FW fixes, FW flashing and recovery support
 
 N: Marco Schwan
 E: bladerf@maggo.info

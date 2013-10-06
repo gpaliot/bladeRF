@@ -13,9 +13,7 @@
 #include "version.h"
 #include "log.h"
 #include "ezusb.h"
-#include "device_identifier.h"
 #include "host_config.h"
-#include "bladerf_devinfo.h"
 #include <time.h>
 
 
@@ -160,10 +158,6 @@ void usage(const char *argv0)
     printf("  The -d option takes a device specifier string. See the bladerf_open()\n");
     printf("  documentation for more information about the format of this string.\n");
     printf("\n");
-    printf("  If the -d parameter is not provided, the first available device\n");
-    printf("  will be used for the provided command, or will be opened prior\n");
-    printf("  to entering interactive mode.\n");
-    printf("\n");
 }
 
 typedef struct {
@@ -211,7 +205,7 @@ static int count_events(
     return 0;
 }
 
-static int init_event_counts(libusb_context *ctx, 
+static int init_event_counts(libusb_context *ctx,
         int vender_id, int product_id, event_count_t * data)
 {
     int status;
@@ -346,13 +340,14 @@ static int find_fx3_via_info(
     struct bladerf_devinfo thisinfo;
     libusb_device *dev, **devs;
     libusb_device *found_dev = NULL;
+    ssize_t status_sz;
 
     count = 0;
 
-    status = libusb_get_device_list(context, &devs);
-    if (status < 0) {
-        log_error("libusb_get_device_list() failed: %d %s\n", status, libusb_error_name(status));
-        return status;
+    status_sz = libusb_get_device_list(context, &devs);
+    if (status_sz < 0) {
+        log_error("libusb_get_device_list() failed: %d %s\n", status_sz, libusb_error_name((int)status_sz));
+        return (int)status_sz;
     }
 
     for (i=0; (dev=devs[i]) != NULL; i++) {
@@ -363,7 +358,6 @@ static int find_fx3_via_info(
         status = get_devinfo(dev, &thisinfo);
         if (status < 0) {
             log_error( "Could not open bladeRF device: %s\n", libusb_error_name(status) );
-            status = status;
             break;
         }
 
@@ -385,7 +379,6 @@ static int find_fx3_via_info(
             status = get_devinfo(dev, &thisinfo);
             if (status < 0) {
                 log_error( "Could not open bladeRF device: %s\n", libusb_error_name(status) );
-                status = status;
                 break;
             }
 
@@ -417,7 +410,7 @@ static int poll_for_events(libusb_context * ctx) {
     time_t end_t = time(NULL) + RECONNECT_TIME;
     struct timeval timeout;
     int status;
-	
+
     timeout.tv_sec = RECONNECT_TIME;
     timeout.tv_usec = 0;
 
@@ -498,9 +491,9 @@ static int reach_bootloader(bool reset, struct bladerf *dev, libusb_context *ctx
 
     status = bladerf_erase_flash(dev, 0, 1);
     if(status != 0) {
-        log_error("Failed to erase first page.  Flashing will likely "
-                "require manual force to FX3 bootloader. See "
-                "http://nuand.com/forums/viewtopic.php?f=6&t=3072\n");
+        log_warning("Maybe failed to erase first page."
+                "A manual reset of the bladeRF may place it in the FX3 "
+                "bootloader.  After the manual reset, try and re-run bladeRF-flash.\n");
         return BLADERF_ERR_UNEXPECTED;
     }
 
@@ -508,8 +501,9 @@ static int reach_bootloader(bool reset, struct bladerf *dev, libusb_context *ctx
     if(status != 0) {
         log_error("Failed to reset device after erasing first page."
                 "A manual reset of the bladeRF should place it in the FX3 "
-                "bootloader.  After the manual reset, re-run bladeRF-flash.");
+                "bootloader.  After the manual reset, re-run bladeRF-flash.\n");
         return BLADERF_ERR_UNEXPECTED;
+
     }
 
     status = look_for_bootloader_connect(ctx, device_out);
@@ -550,7 +544,7 @@ static int get_to_bootloader(bool reset, const char *device_identifier,
         return status;
     } else {
         log_verbose("No bladeRF found, search for bootloader\n");
-        status = str2devinfo(device_identifier, &devinfo);
+        status = bladerf_get_devinfo_from_str(device_identifier, &devinfo);
         if(status != 0) {
             log_error("Failed to parse dev string %s, %s\n",
                 device_identifier, bladerf_strerror(status));
@@ -572,7 +566,7 @@ static int get_bladerf(libusb_context *ctx, struct bladerf_devinfo *devinfo)
 {
     libusb_device *device;
     int count, status;
-	
+
     status = poll_for_events(ctx);
     if(status != 0) {
         return status;
@@ -591,6 +585,7 @@ static int get_bladerf(libusb_context *ctx, struct bladerf_devinfo *devinfo)
 }
 
 int main(int argc, char *argv[])
+
 {
     /* Arguments:
      * - Firmware image
@@ -626,7 +621,9 @@ int main(int argc, char *argv[])
         printf(BLADERF_FLASH_VERSION "\n");
         return 0;
     } else if (rc.show_lib_version) {
-        printf("%s\n", bladerf_version(NULL, NULL, NULL));
+        struct bladerf_version version;
+        bladerf_version(&version);
+        printf("%s\n", version.describe);
         return 0;
     }
 

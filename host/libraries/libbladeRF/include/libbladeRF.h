@@ -71,6 +71,9 @@ typedef enum {
 
 /**
  * Information about a bladeRF attached to the system
+ *
+ * See the \ref FN_DEVINFO section for information on populating and comparing
+ * these structures.
  */
 struct bladerf_devinfo {
     bladerf_backend backend;    /**< Backend to use when connecting to device */
@@ -106,6 +109,20 @@ struct bladerf_stats {
 
     /** The overall throughput of the device in samples/second */
     uint64_t tx_throughput;
+};
+
+/**
+ * Version structure for FPGA, firmware, libbladeRF, and associated utilities
+ */
+struct bladerf_version {
+    uint16_t major;             /**< Major version */
+    uint16_t minor;             /**< Minor version */
+    uint16_t patch;             /**< Patch version */
+    const char *describe;       /**< Version string with any additional suffix
+                                 *   information.
+                                 *
+                                 *   @warning Do not attempt to modify or
+                                 *            free() this string. */
 };
 
 /**
@@ -825,15 +842,14 @@ API_EXPORT int bladerf_get_fpga_size(struct bladerf *dev,
 /**
  * Query firmware version
  *
- * @param[in]   dev     Device handle
- * @param[out]  major   Firmware major version
- * @param[out]  minor   Firmware minor version
+ * @param[in]   dev         Device handle
+ * @param[out]  version     Updated to contain firmware version
  *
- * @return 0 on success, value from \ref RETCODES list on failure
+ * @return 0 on success, value from \ref RETCODES list upon failing to retrieve
+ *         this information from the device.
  */
-API_EXPORT int bladerf_get_fw_version(struct bladerf *dev,
-                                      unsigned int *major,
-                                      unsigned int *minor);
+API_EXPORT int bladerf_fw_version(struct bladerf *dev,
+                                  struct bladerf_version *version);
 
 /**
  * Check FPGA configuration status
@@ -849,14 +865,13 @@ API_EXPORT int bladerf_is_fpga_configured(struct bladerf *dev);
 /**
  * Query FPGA version
  *
- * @param[in]   dev     Device handle
- * @param[out]  major   FPGA major version
- * @param[out]  minor   FPGA minor version
+ * @param[in]   dev         Device handle
+ * @param[out]  version     Updated to contain firmware version
  *
  * @return 0 on success, value from \ref RETCODES list on failure
  */
-API_EXPORT int bladerf_get_fpga_version(struct bladerf *dev,
-                                        unsigned int *major, unsigned int *minor);
+API_EXPORT int bladerf_fpga_version(struct bladerf *dev,
+                                    struct bladerf_version *version);
 
 /**
  * Obtain device statistics
@@ -896,52 +911,31 @@ API_EXPORT int bladerf_flash_firmware(struct bladerf *dev,
  * This method recovers a bladeRF that is in the FX3 bootloader by loading the
  * specified firmware image.
  *
- * The general form of the device identifier string is;
- * @code
- *      <backend>:[device=<bus>:<addr>] [instance=<n>] [serial=<serial>]
- * @endcode
+ * @param[in]   device_identifier  Device identifier, formatted as described in
+ *                                  the bladerf_open() documentation
  *
- * An empty ("") or NULL device identifier will result in the first
- * encountered device being opened (using the first discovered backend)
- *
- * The 'backend' describes the mechanism used to communicate with the device,
- * and may be one of the following:
- *   - libusb:  libusb (See libusb changelog notes for required version, given
- *   your OS and controller)
- *   - linux:   Linux Kernel Driver
- *
- * If no arguments are provided after the backend, the first encountered
- * device on the specified backend will be opened. Note that a backend is
- * required, if any arguments are to be provided.
- *
- * Next, any provided arguments are provide as used to find the desired device.
- * Be sure not to over constrain the search. Generally, only one of the above
- * is required -- providing all of these may over constrain the search for the
- * desired device (e.g., if a serial number matches, but not on the specified
- * bus and address.)
- *
- *   - device=\<bus\>:\<addr\>
- *      - Specifies USB bus and address. Decimal or hex prefixed by '0x' is
- *        permitted.
- *   - instance=\<n\>
- *      - Nth instance encountered (libusb)
- *      - Device node N, such as /dev/bladerfN (linux)
- *   - serial=\<serial\>
- *      - Device's serial number.
- *
- * @param[in]   device_identifier  Device identifier, formatted as described above
- * @param[in]   fname              Filename of FX3 firmware load work
+ * @param[in]   fname              Filename of FX3 firmware to load
  *
  * @return 0 on success, or value from \ref RETCODES list on failure
  */
-API_EXPORT int bladerf_recover_with_devinfo(
-        struct bladerf_devinfo *devinfo,
-        const char *fname
-        );
-API_EXPORT int bladerf_recover(
-        const char *device_identifier,
-        const char *fname
-        );
+API_EXPORT int bladerf_recover(const char *device_identifier,
+                               const char *fname);
+
+/**
+ * Recover specified device using a device identifier information structure
+ *
+ * This method recovers a bladeRF that is in the FX3 bootloader by loading the
+ * specified firmware image.
+ *
+ * @param[in]   devinfo            Device identifier
+ *
+ * @param[in]   fname              Filename of FX3 firmware to load
+ *
+ * @return 0 on success, or value from \ref RETCODES list on failure
+ */
+API_EXPORT int bladerf_recover_with_devinfo(struct bladerf_devinfo *devinfo,
+                                            const char *fname);
+
 
 /**
  * Erase pages from FX3 flash device
@@ -1023,6 +1017,73 @@ API_EXPORT int bladerf_load_fpga(struct bladerf *dev, const char *fpga);
 
 /* @} (End of FN_PROG) */
 
+
+/**
+ * @defgroup FN_DEVINFO Device identifier information functions
+ * @{
+ */
+
+/**
+ * Initialize a device identifier information structure to a "wildcard" state.
+ * The values in each field will match any value for that field.
+ *
+ * Passing a bladerf_devinfo initialized with this function to
+ * bladerf_open_with_devinfo() will match the first device found.
+ */
+API_EXPORT void bladerf_init_devinfo(struct bladerf_devinfo *info);
+
+/**
+ * Fill out a provided bladerf_devinfo structure, given an open device handle.
+ *
+ * @pre dev must be a valid device handle.
+ *
+ * @param[in]    dev     Device handle previously obtained with bladerf_open()
+ * @param[out]   info    Device information populated by this function
+ *
+ * @return 0 on success, value from \ref RETCODES list on failure
+ */
+API_EXPORT int bladerf_get_devinfo(struct bladerf *dev,
+                                   struct bladerf_devinfo *info);
+
+/**
+ * Populate a device identifier information structure using the provided
+ * device identifier string.
+ *
+ * @param[in]   devstr  Device identifier string, formated as described
+ *                      in the bladerf_open() documentation
+ *
+ * @param[out]  info    Upon success, this will be filled out according to the
+ *                      provided device identifier string, with wildcards for
+ *                      any fields that were not provided.
+ *
+ * @return 0 on success, value from \ref RETCODES list on failure
+ */
+API_EXPORT int bladerf_get_devinfo_from_str(const char *devstr,
+                                            struct bladerf_devinfo *info);
+
+/**
+ * Test whether two device identifier information structures match, taking
+ * wildcard values into account.
+ */
+API_EXPORT bool bladerf_devinfo_matches(const struct bladerf_devinfo *a,
+                                        const struct bladerf_devinfo *b);
+
+/**
+ * Test whether a provided device string matches a device described by
+ * the provided bladerf_devinfo structure
+ *
+ * @param[in]   dev_str     Devices string, formated as described in the
+ *                          the documentation of bladerf_open
+ *
+ * @param[in]   info        Device info to compare with
+ *
+ * @return  true upon a match, false otherwise
+ */
+API_EXPORT bool bladerf_devstr_matches(const char *dev_str,
+                                       struct bladerf_devinfo *info);
+/** @} (End of FN_DEVINFO) */
+
+
 /**
  * @defgroup FN_MISC Miscellaneous
  * @{
@@ -1039,22 +1100,11 @@ API_EXPORT int bladerf_load_fpga(struct bladerf *dev, const char *fpga);
 API_EXPORT const char * bladerf_strerror(int error);
 
 /**
- * Get libbladeRF version information.
+ * Get libbladeRF version information
  *
- * The parameters are optional and may be set to NULL if not needed
- *
- * param[out] major     Major version
- * param[out] minor     Minor version
- * param[out] patch     Patch version
- *
- * @warning Do not attempt to modify the returned string.
- *
- * @return  Version string. This value will contain git information for
- *          non-release builds (i.e., a short changeset and "dirty" status)
+ * @param[out]  version     libbladeRF version information
  */
-API_EXPORT const char * bladerf_version(unsigned int *major,
-                                        unsigned int *minor,
-                                        unsigned int *patch);
+API_EXPORT void bladerf_version(struct bladerf_version *version);
 
 /**
  * Sets the filter level for displayed log messages. Messages that are at

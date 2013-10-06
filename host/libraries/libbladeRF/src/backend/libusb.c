@@ -2,7 +2,7 @@
 #include <string.h>
 #include <limits.h>
 #include <errno.h>
-#include <assert.h>
+#include "rel_assert.h"
 #include <stdio.h>
 #include <stdbool.h>
 #include <sys/stat.h>
@@ -13,6 +13,7 @@
 #include "ezusb.h"
 #include "bladerf_priv.h"
 #include "backend/libusb.h"
+#include "conversions.h"
 #include "minmax.h"
 #include "log.h"
 
@@ -93,7 +94,7 @@ static int error_libusb2bladerf(int error)
 
 /* Quick wrapper for vendor commands that get/send a 32-bit integer value */
 static int vendor_command_int(struct bladerf *dev,
-                          uint16_t cmd, uint8_t ep_dir, int32_t *val)
+                          uint8_t cmd, uint8_t ep_dir, int32_t *val)
 {
     int32_t buf;
     int status;
@@ -123,8 +124,74 @@ static int vendor_command_int(struct bladerf *dev,
         status = BLADERF_ERR_IO;
     } else {
         if( ep_dir == EP_DIR_IN ) {
-            *val = buf;
+            *val = LE32_TO_HOST(buf);
         }
+        status = 0;
+    }
+
+    return status;
+}
+
+/* Quick wrapper for vendor commands that get/send a 32-bit integer value + wValue */
+static int vendor_command_int_value(struct bladerf *dev,
+                          uint8_t cmd, uint16_t wValue, int32_t *val)
+{
+    int32_t buf;
+    int status;
+    struct bladerf_lusb *lusb = dev->backend;
+
+    status = libusb_control_transfer(
+                lusb->handle,
+                LIBUSB_RECIPIENT_INTERFACE | LIBUSB_REQUEST_TYPE_VENDOR | EP_DIR_IN,
+                cmd,
+                wValue,
+                0,
+                (unsigned char *)&buf,
+                sizeof(buf),
+                BLADERF_LIBUSB_TIMEOUT_MS
+             );
+
+    if (status < 0) {
+        log_error( "status < 0: %s\n", libusb_error_name(status) );
+        status = error_libusb2bladerf(status);
+    } else if (status != sizeof(buf)) {
+        log_error( "status != sizeof(buf): %s\n", libusb_error_name(status) );
+        status = BLADERF_ERR_IO;
+    } else {
+        *val = LE32_TO_HOST(buf);
+        status = 0;
+    }
+
+    return status;
+}
+
+/* Quick wrapper for vendor commands that get/send a 32-bit integer value + wIndex */
+static int vendor_command_int_index(struct bladerf *dev,
+                          uint8_t cmd, uint16_t wIndex, int32_t *val)
+{
+    int32_t buf;
+    int status;
+    struct bladerf_lusb *lusb = dev->backend;
+
+    status = libusb_control_transfer(
+                lusb->handle,
+                LIBUSB_RECIPIENT_INTERFACE | LIBUSB_REQUEST_TYPE_VENDOR | EP_DIR_IN,
+                cmd,
+                0,
+                wIndex,
+                (unsigned char *)&buf,
+                sizeof(buf),
+                BLADERF_LIBUSB_TIMEOUT_MS
+             );
+
+    if (status < 0) {
+        log_error( "status < 0: %s\n", libusb_error_name(status) );
+        status = error_libusb2bladerf(status);
+    } else if (status != sizeof(buf)) {
+        log_error( "status != sizeof(buf): %s\n", libusb_error_name(status) );
+        status = BLADERF_ERR_IO;
+    } else {
+        *val = LE32_TO_HOST(buf);
         status = 0;
     }
 
@@ -250,37 +317,94 @@ static int lusb_get_devinfo(libusb_device *dev, struct bladerf_devinfo *info)
 
 static int change_setting(struct bladerf *dev, uint8_t setting)
 {
-	int status;
+    int status;
 
     struct bladerf_lusb *lusb = dev->backend ;
     if (dev->legacy  & LEGACY_ALT_SETTING) {
         log_info("Legacy change to interface %d\n", setting);
 
-		/* 
-		 * Workaround: We're not seeing a transfer here in Windows, possibly because
-	     *             something in/under libusb_set_interface_alt_setting() assumes
-		 *             the interface is already set to the current value and 
-		 *             suppresses this attempt. Hence, we force this transfer. 
-		 */
+        /*
+         * Workaround: We're not seeing a transfer here in Windows, possibly because
+         *             something in/under libusb_set_interface_alt_setting() assumes
+         *             the interface is already set to the current value and
+         *             suppresses this attempt. Hence, we force this transfer.
+         */
 #if WIN32
-		status = libusb_control_transfer(lusb->handle,  LIBUSB_RECIPIENT_DEVICE | LIBUSB_REQUEST_TYPE_STANDARD | LIBUSB_ENDPOINT_OUT, 11, 0, setting, 0, 0, 0);
-		if (status > 0) {
-			status = 0;
-		}
-#else 
+        status = libusb_control_transfer(lusb->handle,  LIBUSB_RECIPIENT_DEVICE | LIBUSB_REQUEST_TYPE_STANDARD | LIBUSB_ENDPOINT_OUT, 11, 0, setting, 0, 0, 0);
+        if (status > 0) {
+            status = 0;
+        }
+#else
         status = libusb_set_interface_alt_setting(lusb->handle, setting, 0);
 #endif
-		return status;
+        return status;
     } else {
         log_info( "Change to alternate interface %d\n", setting);
         return libusb_set_interface_alt_setting(lusb->handle, 0, setting);
     }
 }
 
+static int enable_rf(struct bladerf *dev) {
+    int status;
+    int32_t fx3_ret = -1;
+    int ret_status = 0;
+    uint16_t val;
+
+    status = change_setting(dev, USB_IF_RF_LINK);
+    if(status < 0) {
+        status = error_libusb2bladerf(status);
+        bladerf_set_error(&dev->error, ETYPE_LIBBLADERF, status);
+        log_error( "alt_setting issue: %s\n", libusb_error_name(status) );
+        return status;
+    }
+    log_info( "Changed into RF link mode: %s\n", libusb_error_name(status) ) ;
+    val = 1;
+
+    if (dev->legacy) {
+        int32_t val32 = val;
+        status = vendor_command_int(dev, BLADE_USB_CMD_RF_RX, EP_DIR_OUT, &val32);
+        fx3_ret = 0;
+    } else {
+        status = vendor_command_int_value(
+                dev, BLADE_USB_CMD_RF_RX,
+                val, &fx3_ret);
+    }
+    if(status) {
+        log_warning("Could not enable RF RX (%d): %s\n",
+                status, libusb_error_name(status) );
+        ret_status = BLADERF_ERR_UNEXPECTED;
+    } else if(fx3_ret) {
+        log_warning("Error enabling RF RX (%d)\n",
+                fx3_ret );
+        ret_status = BLADERF_ERR_UNEXPECTED;
+    }
+
+    if (dev->legacy) {
+        int32_t val32 = val;
+        status = vendor_command_int(dev, BLADE_USB_CMD_RF_TX, EP_DIR_OUT, &val32);
+        fx3_ret = 0;
+    } else {
+        status = vendor_command_int_value(
+                dev, BLADE_USB_CMD_RF_TX,
+                val, &fx3_ret);
+    }
+    if(status) {
+        log_warning("Could not enable RF TX (%d): %s\n",
+                status, libusb_error_name(status) );
+        ret_status = BLADERF_ERR_UNEXPECTED;
+    } else if(fx3_ret) {
+        log_warning("Error enabling RF TX (%d)\n",
+                fx3_ret );
+        ret_status = BLADERF_ERR_UNEXPECTED;
+    }
+
+    return ret_status;
+}
+
 static int lusb_open(struct bladerf **device, struct bladerf_devinfo *info)
 {
-    int status, i, n, inf, val;
-	int fx3_status;
+    int status, i, n, inf;
+    int fx3_status;
     ssize_t count;
     struct bladerf *dev = NULL;
     struct bladerf_lusb *lusb = NULL;
@@ -326,23 +450,48 @@ static int lusb_open(struct bladerf **device, struct bladerf_devinfo *info)
             if( bladerf_devinfo_matches( &thisinfo, info ) ) {
 
                 /* Allocate backend structure and populate*/
-                dev = (struct bladerf *)malloc(sizeof(struct bladerf));
-                lusb = (struct bladerf_lusb *)malloc(sizeof(struct bladerf_lusb));
+                dev = (struct bladerf *)calloc(1, sizeof(struct bladerf));
+                if (!dev) {
+                    log_error("Skipping instance %d due to failed allocation: "
+                              "device handle.\n", thisinfo.instance);
+                    continue;
+                }
 
-                if (!dev || !lusb) {
+                dev->fpga_version_str = calloc(1, BLADERF_VERSION_STR_MAX + 1);
+                if (!dev->fpga_version_str) {
+                    log_error("Skipping instance %d due to failed allocation: "
+                              "FPGA version string.\n", thisinfo.instance);
                     free(dev);
-                    free(lusb);
-                    log_warning("Skipping instance %d due to memory allocation "
-                                "error", thisinfo.instance);
+                    dev = NULL;
+                    continue;
+                }
 
+                dev->fw_version_str = calloc(1, BLADERF_VERSION_STR_MAX + 1);
+                if (!dev->fw_version_str) {
+                    log_error("Skipping instance %d due to failed allocation\n",
+                              thisinfo.instance);
+                    free(dev->fpga_version_str);
+                    free(dev);
+                    dev = NULL;
+                    continue;
+                }
+
+                lusb = (struct bladerf_lusb *)malloc(sizeof(struct bladerf_lusb));
+                if (!lusb) {
+                    free(dev->fw_version_str);
+                    free(dev->fpga_version_str);
+                    free(dev);
+                    lusb = NULL;
+                    dev = NULL;
                     continue;
                 }
 
                 /* Assign libusb function table, backend type and backend */
                 dev->fn = &bladerf_lusb_fn;
                 dev->backend = (void *)lusb;
-                dev->backend_type = BLADERF_BACKEND_LIBUSB;
                 dev->legacy = 0;
+
+                memcpy(&dev->ident, &thisinfo, sizeof(struct bladerf_devinfo));
 
                 /* Populate the backend information */
                 lusb->context = context;
@@ -356,12 +505,21 @@ static int lusb_open(struct bladerf **device, struct bladerf_devinfo *info)
                     goto lusb_open__err_device_list;
                 }
 
-                bladerf_get_fw_version(dev, &dev->fw_major, &dev->fw_minor);
-                if (dev->fw_major < FW_LEGACY_ALT_SETTING_MAJOR ||
-                        (dev->fw_major == FW_LEGACY_ALT_SETTING_MAJOR && dev->fw_minor < FW_LEGACY_ALT_SETTING_MINOR)) {
+                status = bladerf_fw_version(dev, &dev->fw_version);
+                if (status < 0) {
+                    goto lusb_open__err_device_list;
+                }
+
+                if (dev->fw_version.major < FW_LEGACY_ALT_SETTING_MAJOR ||
+                        (dev->fw_version.major == FW_LEGACY_ALT_SETTING_MAJOR &&
+                         dev->fw_version.minor < FW_LEGACY_ALT_SETTING_MINOR)) {
                     dev->legacy = LEGACY_ALT_SETTING;
                 }
 
+                if (dev->fw_version.major < FW_LEGACY_CONFIG_IF_MAJOR ||
+                        (dev->fw_version.major == FW_LEGACY_CONFIG_IF_MAJOR && dev->fw_version.minor < FW_LEGACY_CONFIG_IF_MINOR)) {
+                    dev->legacy |= LEGACY_CONFIG_IF;
+                }
 
                 /* Claim interfaces */
                 for( inf = 0; inf < ((dev->legacy & LEGACY_ALT_SETTING) ? 3 : 1) ; inf++ ) {
@@ -394,18 +552,7 @@ static int lusb_open(struct bladerf **device, struct bladerf_devinfo *info)
 
     if (dev) {
         if (lusb_is_fpga_configured(dev)) {
-            status = change_setting(dev, USB_IF_RF_LINK);
-            log_info( "Changed into RF link mode: %s\n", libusb_error_name(status) ) ;
-            val = 1;
-            status = vendor_command_int(dev, BLADE_USB_CMD_RF_RX, EP_DIR_OUT, &val);
-            if(status) {
-                log_warning("Could not enable RF RX (%d): %s\n", status, libusb_error_name(status) );
-            }
-
-            status = vendor_command_int(dev, BLADE_USB_CMD_RF_TX, EP_DIR_OUT, &val);
-            if(status) {
-                log_warning("Could not enable RF TX (%d): %s\n", status, libusb_error_name(status) );
-            }
+            enable_rf(dev);
         }
     }
 
@@ -449,7 +596,6 @@ static int lusb_close(struct bladerf *dev)
     int inf = 0;
     struct bladerf_lusb *lusb = dev->backend;
 
-
     for( inf = 0; inf < ((dev->legacy & LEGACY_ALT_SETTING) ? 3 : 1) ; inf++ ) {
         status = libusb_release_interface(lusb->handle, inf);
         if (status < 0) {
@@ -461,6 +607,8 @@ static int lusb_close(struct bladerf *dev)
     libusb_close(lusb->handle);
     libusb_exit(lusb->context);
     free(dev->backend);
+    free(dev->fpga_version_str);
+    free(dev->fw_version_str);
     free(dev);
 
     return status;
@@ -469,12 +617,17 @@ static int lusb_close(struct bladerf *dev)
 static int lusb_load_fpga(struct bladerf *dev, uint8_t *image, size_t image_size)
 {
     unsigned int wait_count;
-    int status = 0, val;
+    int status = 0;
     int transferred = 0;
     struct bladerf_lusb *lusb = dev->backend;
 
     /* Make sure we are using the configuration interface */
-    status = change_setting(dev, USB_IF_CONFIG);
+    if (dev->legacy & LEGACY_CONFIG_IF) {
+        status = change_setting(dev, USB_IF_LEGACY_CONFIG);
+    } else {
+        status = change_setting(dev, USB_IF_CONFIG);
+    }
+
     if(status < 0) {
         status = error_libusb2bladerf(status);
         bladerf_set_error(&dev->error, ETYPE_LIBBLADERF, status);
@@ -491,7 +644,8 @@ static int lusb_load_fpga(struct bladerf *dev, uint8_t *image, size_t image_size
     }
 
     /* Send the file down */
-    status = libusb_bulk_transfer(lusb->handle, 0x2, image, image_size,
+    assert(image_size <= INT_MAX);
+    status = libusb_bulk_transfer(lusb->handle, 0x2, image, (int)image_size,
                                   &transferred, 5 * BLADERF_LIBUSB_TIMEOUT_MS);
     if (status < 0) {
         status = error_libusb2bladerf(status);
@@ -499,7 +653,7 @@ static int lusb_load_fpga(struct bladerf *dev, uint8_t *image, size_t image_size
         return status;
     }
 
-    /*  End programming */
+    /* End programming */
     status = end_fpga_programming(dev);
     if (status) {
         status = error_libusb2bladerf(status);
@@ -531,22 +685,7 @@ static int lusb_load_fpga(struct bladerf *dev, uint8_t *image, size_t image_size
         return BLADERF_ERR_TIMEOUT;
     }
 
-    /* Go into RF link mode by selecting interface 1 */
-    status = change_setting(dev, USB_IF_RF_LINK);
-    if(status) {
-        log_info("libusb_set_interface_alt_setting: %s\n", libusb_error_name(status));
-    }
-
-    val = 1;
-    status = vendor_command_int(dev, BLADE_USB_CMD_RF_RX, EP_DIR_OUT, &val);
-    if(status) {
-        log_warning("Could not enable RF RX (%d): %s\n", status, libusb_error_name(status) );
-    }
-
-    status = vendor_command_int(dev, BLADE_USB_CMD_RF_TX, EP_DIR_OUT, &val);
-    if(status) {
-        log_warning("Could not enable RF TX (%d): %s\n", status, libusb_error_name(status) );
-    }
+    status = enable_rf(dev);
 
     return status;
 }
@@ -586,12 +725,13 @@ static int lusb_erase_flash(struct bladerf *dev, int sector_offset, int n_bytes)
                                 sizeof(erase_ret),
                                 BLADERF_LIBUSB_TIMEOUT_MS);
 
-        if (status != sizeof(erase_ret) || !erase_ret) {
+        if (status != sizeof(erase_ret) || ((!(dev->legacy & LEGACY_CONFIG_IF)) &&  erase_ret != 0)) {
             log_error("Failed to erase sector %d\n", sector_to_erase);
             if (status < 0) {
                 log_error("libusb status: %s\n", libusb_error_name(status));
-            } else if (!erase_ret) {
-                log_error("Received erase failure status from FX3.\n");
+            } else if (erase_ret != 0) {
+                log_error("Received erase failure status from FX3. error = %d\n",
+                        erase_ret);
             } else {
                 log_error("Unexpected read size: %d\n", status);
             }
@@ -609,26 +749,65 @@ static int lusb_erase_flash(struct bladerf *dev, int sector_offset, int n_bytes)
     }
 }
 
-static int lusb_read_flash(struct bladerf *dev, int page_offset,
+static int read_buffer(struct bladerf *dev, int request,
+        int read_size, size_t total_size, uint8_t *ptr)
+{
+    struct bladerf_lusb *lusb = dev->backend;
+
+    size_t buf_off;
+    int status;
+
+    assert(total_size <= UINT16_MAX);
+
+    for(buf_off = 0; buf_off < total_size; buf_off += read_size)
+    {
+        status = libusb_control_transfer(
+                    lusb->handle,
+                    LIBUSB_RECIPIENT_INTERFACE |
+                        LIBUSB_REQUEST_TYPE_VENDOR |
+                        EP_DIR_IN,
+                    request,
+                    0,
+                    (uint16_t)buf_off,
+                    &ptr[buf_off],
+                    read_size,
+                    BLADERF_LIBUSB_TIMEOUT_MS);
+
+        if(status < 0) {
+            log_error("Failed to read page buffer at offset 0x%02x: %s\n",
+                    buf_off, libusb_error_name(status));
+            return error_libusb2bladerf(status);
+        } else if(status != read_size) {
+            log_error("Got unexpected read size when writing page buffer at offset 0x%02x: "
+                    "expected %d, got %d\n",
+                    read_size, status);
+            return BLADERF_ERR_IO;
+        }
+    }
+
+    return 0;
+}
+
+static int read_page_buffer(struct bladerf *dev, int read_size, uint8_t *ptr)
+{
+    return read_buffer(dev, BLADE_USB_CMD_READ_PAGE_BUFFER,
+            read_size, FLASH_PAGE_SIZE, ptr);
+}
+
+static int legacy_lusb_read_flash(struct bladerf *dev, int page_offset,
                         uint8_t *ptr, size_t n_bytes)
 {
     int status = 0;
-    int page_i, n_read, total_read;
+    size_t page_i;
+    int n_read, total_read;
     int read_size = dev->speed ? FLASH_PAGE_SIZE: 64;
-    int pages_to_read = FLASH_BYTES_TO_PAGES(n_bytes);
+    size_t pages_to_read = FLASH_BYTES_TO_PAGES(n_bytes);
     struct bladerf_lusb *lusb = dev->backend;
 
     assert(page_offset < FLASH_NUM_PAGES);
     assert((page_offset + n_bytes) < FLASH_NUM_PAGES);
     /* FIXME: support data_size that are not multiple of pages */
     assert(n_bytes % FLASH_PAGE_SIZE == 0);
-
-    status = change_setting(dev, USB_IF_SPI_FLASH);
-
-    if (status) {
-        log_error("Failed to set interface: %s\n", libusb_error_name(status));
-        status = BLADERF_ERR_IO;
-    }
 
     total_read = 0;
 
@@ -646,7 +825,7 @@ static int lusb_read_flash(struct bladerf *dev, int page_offset,
                             EP_DIR_IN,
                         BLADE_USB_CMD_FLASH_READ,
                         0,
-                        page_i,
+                        (uint16_t)page_i,
                         ptr,
                         read_size,
                         BLADERF_LIBUSB_TIMEOUT_MS);
@@ -677,14 +856,82 @@ static int lusb_read_flash(struct bladerf *dev, int page_offset,
     }
 }
 
+static int read_one_page(struct bladerf *dev, int read_size, uint16_t page_offset, uint8_t *ptr)
+{
+    int32_t read_status = -1;
+    int status;
+
+    if (dev->legacy & LEGACY_CONFIG_IF)
+        return (legacy_lusb_read_flash(dev, page_offset, ptr, FLASH_PAGE_SIZE) != FLASH_PAGE_SIZE);
+
+    status = vendor_command_int_index(
+            dev, BLADE_USB_CMD_FLASH_READ,
+            page_offset, &read_status);
+    if(status != LIBUSB_SUCCESS) {
+        return status;
+    }
+
+    if(read_status != 0) {
+        log_error("Failed to read page %d: %d\n",
+                page_offset, read_status);
+        status = BLADERF_ERR_UNEXPECTED;
+    }
+
+    return read_page_buffer(dev, read_size, ptr);
+}
+
+static int lusb_read_flash(struct bladerf *dev, int page_offset,
+                        uint8_t *ptr, size_t n_bytes)
+{
+    int status = 0;
+    uint16_t page_i;
+    int total_read;
+    int read_size = dev->speed ? FLASH_PAGE_SIZE : 64;
+    size_t pages_to_read = FLASH_BYTES_TO_PAGES(n_bytes);
+
+    if (dev->legacy & LEGACY_CONFIG_IF)
+        return legacy_lusb_read_flash(dev, page_offset, ptr, n_bytes);
+
+    status = change_setting(dev, USB_IF_SPI_FLASH);
+
+    if (status) {
+        log_error("Failed to set interface: %s\n", libusb_error_name(status));
+        status = BLADERF_ERR_IO;
+    }
+
+    assert(page_offset < FLASH_NUM_PAGES);
+    assert((page_offset + n_bytes) < FLASH_NUM_PAGES);
+    assert(n_bytes % FLASH_PAGE_SIZE == 0);
+
+    assert(page_offset + pages_to_read <= UINT16_MAX);
+
+    total_read = 0;
+
+    for (page_i = page_offset;
+         page_i < (page_offset + pages_to_read) && !status;
+         page_i++) {
+
+        /* Read back a page */
+        status = read_one_page(dev, read_size, page_i, ptr);
+        ptr += FLASH_PAGE_SIZE;
+        total_read += FLASH_PAGE_SIZE;
+    }
+
+    if (status == 0) {
+        return total_read;
+    } else {
+        return status;
+    }
+}
+
 static int verify_flash(struct bladerf *dev, int page_offset,
                         uint8_t *image, size_t n_bytes)
 {
     int status = 0;
-    int page_i, check_i, n_read;
+    uint16_t page_i;
+    int check_i;
     int read_size = dev->speed ? FLASH_PAGE_SIZE: 64;
-    int pages_to_read = FLASH_BYTES_TO_PAGES(n_bytes);
-    struct bladerf_lusb *lusb = dev->backend;
+    size_t pages_to_read = FLASH_BYTES_TO_PAGES(n_bytes);
 
     uint8_t page_buf[FLASH_PAGE_SIZE];
     uint8_t *image_page;
@@ -692,42 +939,16 @@ static int verify_flash(struct bladerf *dev, int page_offset,
     log_info("Verifying with read size = %d\n", read_size);
 
     assert(page_offset < FLASH_NUM_PAGES);
-    assert((page_offset + n_bytes) < FLASH_NUM_PAGES);
+    assert((page_offset + pages_to_read) < FLASH_NUM_PAGES);
+
+    assert(page_offset + pages_to_read <= UINT16_MAX);
 
     for (page_i = page_offset;
          page_i < (page_offset + pages_to_read) && !status;
          page_i++) {
 
         /* Read back a page */
-        n_read = 0;
-        do {
-            status = libusb_control_transfer(
-                        lusb->handle,
-                        LIBUSB_RECIPIENT_INTERFACE |
-                            LIBUSB_REQUEST_TYPE_VENDOR |
-                            EP_DIR_IN,
-                        BLADE_USB_CMD_FLASH_READ,
-                        0,
-                        page_i,
-                        page_buf + n_read,
-                        read_size,
-                        BLADERF_LIBUSB_TIMEOUT_MS);
-
-
-            if (status != read_size) {
-                if (status < 0) {
-                    log_error("Failed to read back page %d: %s\n", page_i,
-                               libusb_error_name(status));
-                } else {
-                    log_error("Unexpected read size: %d\n", status);
-                }
-
-                status = BLADERF_ERR_IO;
-            } else {
-                n_read += read_size;
-                status = 0;
-            }
-        } while (n_read < FLASH_PAGE_SIZE && !status);
+        status = read_one_page(dev, read_size, page_i, page_buf);
 
         /* Verify the page */
         for (check_i = 0; check_i < FLASH_PAGE_SIZE && !status; check_i++) {
@@ -748,14 +969,65 @@ static int verify_flash(struct bladerf *dev, int page_offset,
     return status;
 }
 
-static int lusb_write_flash(struct bladerf *dev, int page_offset,
+static int write_one_page(struct bladerf *dev, int write_size, uint16_t page_offset, uint8_t *data)
+{
+    struct bladerf_lusb *lusb = dev->backend;
+    uint16_t buf_off;
+    int32_t write_status = -1;
+    int status;
+
+    assert(write_size <= UINT16_MAX);
+
+    for(buf_off = 0; buf_off < FLASH_PAGE_SIZE; buf_off += (uint16_t)write_size)
+    {
+        status = libusb_control_transfer(
+                    lusb->handle,
+                    LIBUSB_RECIPIENT_INTERFACE |
+                        LIBUSB_REQUEST_TYPE_VENDOR |
+                        EP_DIR_OUT,
+                    BLADE_USB_CMD_WRITE_PAGE_BUFFER,
+                    0,
+                    buf_off,
+                    &data[buf_off],
+                    write_size,
+                    BLADERF_LIBUSB_TIMEOUT_MS);
+
+        if(status < 0) {
+            log_error("Failed to write page buffer at offset 0x%02x for page %d: %s\n",
+                    buf_off, page_offset, libusb_error_name(status));
+            return error_libusb2bladerf(status);
+        } else if(status != write_size) {
+            log_error("Got unexpected write size when writing page buffer at offset 0x%02x: "
+                    "expected %d, got %d\n",
+                    write_size, status);
+            return BLADERF_ERR_IO;
+        }
+    }
+
+    status = vendor_command_int_index(
+            dev, BLADE_USB_CMD_FLASH_WRITE,
+            page_offset, &write_status);
+    if(status != LIBUSB_SUCCESS) {
+        return status;
+    }
+
+    if(write_status != 0) {
+        log_error("Failed to write page %d: %d\n",
+                page_offset, write_status);
+        status = BLADERF_ERR_UNEXPECTED;
+    }
+
+    return 0;
+}
+
+static int legacy_lusb_write_flash(struct bladerf *dev, int page_offset,
                         uint8_t *data, size_t data_size)
 {
     int status = 0;
-    int i;
+    size_t i;
     int n_write, total_written;
     int write_size = dev->speed ? FLASH_PAGE_SIZE : 64;
-    int pages_to_write = FLASH_BYTES_TO_PAGES(data_size);
+    size_t pages_to_write = FLASH_BYTES_TO_PAGES(data_size);
     struct bladerf_lusb *lusb = dev->backend;
     uint8_t *data_page;
 
@@ -787,7 +1059,7 @@ static int lusb_write_flash(struct bladerf *dev, int page_offset,
                             EP_DIR_OUT,
                         BLADE_USB_CMD_FLASH_WRITE,
                         0,
-                        i,
+                        (uint16_t)i,
                         (unsigned char *)data_page,
                         write_size,
                         BLADERF_LIBUSB_TIMEOUT_MS);
@@ -815,6 +1087,47 @@ static int lusb_write_flash(struct bladerf *dev, int page_offset,
     }
 }
 
+static int lusb_write_flash(struct bladerf *dev, int page_offset,
+                        uint8_t *data, size_t data_size)
+{
+    int status = 0;
+    uint16_t i;
+    int total_written;
+    size_t pages_to_write = FLASH_BYTES_TO_PAGES(data_size);
+    int write_size = dev->speed ? FLASH_PAGE_SIZE : 64;
+
+    if (dev->legacy & LEGACY_CONFIG_IF)
+        return legacy_lusb_write_flash(dev, page_offset, data, data_size);
+
+    status = change_setting(dev, USB_IF_SPI_FLASH);
+
+    if (status) {
+        log_error("Failed to set interface: %s\n", libusb_error_name(status));
+        status = BLADERF_ERR_IO;
+    }
+
+    log_info("Flashing with write size = %d\n", write_size);
+
+    assert(page_offset < FLASH_NUM_PAGES);
+    assert((page_offset + pages_to_write) < FLASH_NUM_PAGES);
+    assert(data_size % FLASH_PAGE_SIZE == 0);
+    assert(page_offset + pages_to_write <= UINT16_MAX);
+
+    total_written = 0;
+
+    for (i = page_offset; i < (page_offset + pages_to_write) && !status; i++) {
+        status = write_one_page(dev, write_size, i, data);
+        total_written += FLASH_PAGE_SIZE;
+        data += FLASH_PAGE_SIZE;
+    }
+
+    if (status == 0) {
+        return total_written;
+    } else {
+        return status;
+    }
+}
+
 static int find_fx3_via_info(
         libusb_context * context,
         struct bladerf_devinfo *info,
@@ -823,11 +1136,12 @@ static int find_fx3_via_info(
     struct bladerf_devinfo thisinfo;
     libusb_device *dev, **devs;
     libusb_device *found_dev = NULL;
+    ssize_t status_sz;
 
-    status = libusb_get_device_list(context, &devs);
-    if (status < 0) {
-        log_error("libusb_get_device_list() failed: %d %s\n", status, libusb_error_name(status));
-        return error_libusb2bladerf(status);
+    status_sz = libusb_get_device_list(context, &devs);
+    if (status_sz < 0) {
+        log_error("libusb_get_device_list() failed: %d %s\n", status_sz, libusb_error_name((int)status_sz));
+        return error_libusb2bladerf((int)status_sz);
     }
 
     for (i=0; (dev=devs[i]) != NULL; i++) {
@@ -900,23 +1214,16 @@ static int lusb_flash_firmware(struct bladerf *dev,
 {
     int status;
 
-    status = change_setting(dev, USB_IF_SPI_FLASH);
+    assert(image_size <= INT_MAX);
 
-    if (status) {
-        log_error("Failed to set interface: %s\n", libusb_error_name(status));
-        status = BLADERF_ERR_IO;
-    }
+    status = lusb_erase_flash(dev, 0, (int)image_size);
 
-    if (status == 0) {
-        status = lusb_erase_flash(dev, 0, image_size);
+    if (status >= 0) {
+        status = lusb_write_flash(dev, 0, image, (int)image_size);
     }
 
     if (status >= 0) {
-        status = lusb_write_flash(dev, 0, image, image_size);
-    }
-
-    if (status >= 0) {
-        status = verify_flash(dev, 0, image, image_size);
+        status = verify_flash(dev, 0, image, (int)image_size);
     }
 
     /* A reset will be required at this point, so there's no sense in
@@ -977,57 +1284,46 @@ static int lusb_jump_to_bootloader(struct bladerf *dev)
 
 static int lusb_get_otp(struct bladerf *dev, char *otp)
 {
-    struct bladerf_lusb *lusb = dev->backend;
     int status;
     int read_size = dev->speed ? 256 : 64;
-    int nbytes;
+    int otp_page = 0;
+    int32_t read_status = -1;
 
-    for (nbytes = 0; nbytes < 256; nbytes += status) {
-        status = libusb_control_transfer(
-                lusb->handle,
-                LIBUSB_RECIPIENT_INTERFACE |
-                    LIBUSB_REQUEST_TYPE_VENDOR |
-                    EP_DIR_IN,
-                BLADE_USB_CMD_READ_OTP,
-                0,
-                0,
-                (unsigned char *)&otp[nbytes],
-                read_size,
-                BLADERF_LIBUSB_TIMEOUT_MS);
-        if (status < 0) {
-            log_error("Failed to read OTP (%d): %s\n", status, libusb_error_name(status));
-            return error_libusb2bladerf(status);
-        }
-    }
-    return 0;
-}
-
-#define CAL_SIZE 256
-
-static int lusb_get_cal(struct bladerf *dev, char *cal) {
-    int status = lusb_read_flash(dev, 768, (uint8_t *)cal, CAL_SIZE);
-
-    if (status < 0) {
-        return status;
-    } else if (status == CAL_SIZE) {
-        return 0;
-    } else {
+    status = change_setting(dev, USB_IF_SPI_FLASH);
+    if (status) {
+        log_error("Failed to set interface: %s\n", libusb_error_name(status));
         return BLADERF_ERR_IO;
     }
+
+    status = vendor_command_int_index(
+            dev, BLADE_USB_CMD_READ_OTP,
+            otp_page, &read_status);
+    if(status != LIBUSB_SUCCESS) {
+        return status;
+    }
+
+    if(read_status != 0) {
+        log_error("Failed to read OTP page %d: %d\n",
+                otp_page, read_status);
+        return BLADERF_ERR_UNEXPECTED;
+    }
+
+    return read_page_buffer(dev, read_size, (uint8_t*)otp);
 }
 
-static int lusb_get_fw_version(struct bladerf *dev,
-                               unsigned int *maj, unsigned int *min)
+static int lusb_get_cal(struct bladerf *dev, char *cal) {
+    int read_size = dev->speed ? 256 : 64;
+    return read_buffer(dev, BLADE_USB_CMD_READ_CAL_CACHE,
+            read_size, CAL_BUFFER_SIZE, (uint8_t*)cal);
+}
+
+/* FW < 1.5.0  does not have version strings */
+static int lusb_fw_version_legacy(struct bladerf *dev,
+                                    struct bladerf_version *version)
 {
     int status;
 
-    /* FIXME  We're playing with fire here - these structures need to be
-     *        serialized/deserialized when communicating them between the
-     *        host and the FX3. If the contents are change to not
-     *        conveniently land on word boundaries and the struct is
-     *        padded, we'll run into trouble.
-     */
-    struct bladeRF_version fw_ver;
+    struct bladerf_fx3_version fw_ver;
     struct bladerf_lusb *lusb = dev->backend;
 
     status = libusb_control_transfer(
@@ -1045,22 +1341,52 @@ static int lusb_get_fw_version(struct bladerf *dev,
 
     if (status < 0) {
         status = BLADERF_ERR_IO;
-        *maj = *min = 0;
     } else {
-        *maj = (unsigned int) LE16_TO_HOST(fw_ver.major);
-        *min = (unsigned int) LE16_TO_HOST(fw_ver.minor);
+        version->major = LE16_TO_HOST(fw_ver.major);
+        version->minor = LE16_TO_HOST(fw_ver.minor);
+        version->patch = 0;
+        version->describe = dev->fw_version_str;
+        snprintf(dev->fw_version_str, BLADERF_VERSION_STR_MAX, "%d.%d.%d",
+                 version->major, version->minor, version->patch);
         status = 0;
     }
 
     return status;
 }
 
-static int lusb_get_fpga_version(struct bladerf *dev,
-                                 unsigned int *maj, unsigned int *min)
+static int lusb_fw_version(struct bladerf *dev,
+                           struct bladerf_version *version)
 {
-    log_warning("FPGA currently does not have a version number.\n");
-    *maj = 0;
-    *min = 0;
+    int status;
+    struct bladerf_lusb *lusb = dev->backend;
+
+    status = libusb_get_string_descriptor_ascii(lusb->handle,
+                                                BLADE_USB_STR_INDEX_FW_VER,
+                                                (unsigned char *)dev->fw_version_str,
+                                                BLADERF_VERSION_STR_MAX);
+
+    /* If we ran into an issue, we're likely dealing with an older firmware.
+     * Fall back to the legacy version*/
+    if (status < 0) {
+        status = lusb_fw_version_legacy(dev, version);
+    } else {
+        status = str2version(dev->fw_version_str, version);
+        if (status != 0) {
+            status = BLADERF_ERR_UNEXPECTED;
+        }
+    }
+
+    return status;
+}
+
+static int lusb_fpga_version(struct bladerf *dev,
+                             struct bladerf_version *version)
+{
+    log_debug("FPGA currently does not have a version number.\n");
+    version->major = 0;
+    version->minor = 0;
+    version->patch = 0;
+    version->describe = dev->fpga_version_str;
     return 0;
 }
 
@@ -1201,6 +1527,8 @@ static int lusb_si5338_write(struct bladerf *dev, uint8_t addr, uint8_t data)
     cmd.addr = addr;
     cmd.data = data;
 
+    log_verbose( "%s: 0x%2.2x 0x%2.2x\n", __FUNCTION__, addr, data );
+
     status = access_peripheral(lusb, UART_PKT_DEV_SI5338,
                                UART_PKT_MODE_DIR_WRITE, &cmd);
 
@@ -1229,6 +1557,8 @@ static int lusb_si5338_read(struct bladerf *dev, uint8_t addr, uint8_t *data)
         *data = cmd.data;
     }
 
+    log_verbose( "%s: 0x%2.2x 0x%2.2x\n", __FUNCTION__, addr, *data );
+
     return status;
 }
 
@@ -1240,6 +1570,8 @@ static int lusb_lms_write(struct bladerf *dev, uint8_t addr, uint8_t data)
 
     cmd.addr = addr;
     cmd.data = data;
+
+    log_verbose( "%s: 0x%2.2x 0x%2.2x\n", __FUNCTION__, addr, data );
 
     status = access_peripheral(lusb, UART_PKT_DEV_LMS,
                                 UART_PKT_MODE_DIR_WRITE, &cmd);
@@ -1259,6 +1591,7 @@ static int lusb_lms_read(struct bladerf *dev, uint8_t addr, uint8_t *data)
 
     cmd.addr = addr;
     cmd.data = 0xff;
+
     status = access_peripheral(lusb, UART_PKT_DEV_LMS,
                                UART_PKT_MODE_DIR_READ, &cmd);
 
@@ -1267,6 +1600,8 @@ static int lusb_lms_read(struct bladerf *dev, uint8_t addr, uint8_t *data)
     } else {
         *data = cmd.data;
     }
+
+    log_verbose( "%s: 0x%2.2x 0x%2.2x\n", __FUNCTION__, addr, *data );
 
     return status;
 }
@@ -1302,7 +1637,7 @@ static int lusb_dac_write(struct bladerf *dev, uint16_t value)
 static int lusb_tx(struct bladerf *dev, bladerf_format format, void *samples,
                    int n, struct bladerf_metadata *metadata)
 {
-    size_t bytes_total, bytes_remaining;
+    size_t bytes_total, bytes_remaining, ret;
     struct bladerf_lusb *lusb = (struct bladerf_lusb *)dev->backend;
     uint8_t *samples8 = (uint8_t *)samples;
     int transferred, status;
@@ -1312,13 +1647,15 @@ static int lusb_tx(struct bladerf *dev, bladerf_format format, void *samples,
 
     bytes_total = bytes_remaining = c16_samples_to_bytes(n);
 
+    assert(bytes_remaining <= INT_MAX);
+
     while( bytes_remaining > 0 ) {
         transferred = 0;
         status = libusb_bulk_transfer(
                     lusb->handle,
                     EP_OUT(0x1),
                     samples8,
-                    bytes_remaining,
+                    (int)bytes_remaining,
                     &transferred,
                     BLADERF_LIBUSB_TIMEOUT_MS
                 );
@@ -1327,18 +1664,21 @@ static int lusb_tx(struct bladerf *dev, bladerf_format format, void *samples,
             return BLADERF_ERR_IO;
         } else {
             assert(transferred > 0);
+            assert(bytes_remaining >= (size_t)transferred);
             bytes_remaining -= transferred;
             samples8 += transferred;
         }
     }
 
-    return bytes_to_c16_samples(bytes_total - bytes_remaining);
+    ret = bytes_to_c16_samples(bytes_total - bytes_remaining);
+    assert(ret <= INT_MAX);
+    return (int)ret;
 }
 
 static int lusb_rx(struct bladerf *dev, bladerf_format format, void *samples,
                    int n, struct bladerf_metadata *metadata)
 {
-    int bytes_total, bytes_remaining = c16_samples_to_bytes(n);
+    size_t bytes_total, bytes_remaining, ret;
     struct bladerf_lusb *lusb = (struct bladerf_lusb *)dev->backend;
     uint8_t *samples8 = (uint8_t *)samples;
     int transferred, status;
@@ -1347,13 +1687,15 @@ static int lusb_rx(struct bladerf *dev, bladerf_format format, void *samples,
     assert(format == BLADERF_FORMAT_SC16_Q12);
     bytes_total = bytes_remaining = c16_samples_to_bytes(n);
 
+    assert(bytes_remaining <= INT_MAX);
+
     while( bytes_remaining ) {
         transferred = 0;
         status = libusb_bulk_transfer(
                     lusb->handle,
                     EP_IN(0x1),
                     samples8,
-                    bytes_remaining,
+                    (int)bytes_remaining,
                     &transferred,
                     BLADERF_LIBUSB_TIMEOUT_MS
                 );
@@ -1362,12 +1704,16 @@ static int lusb_rx(struct bladerf *dev, bladerf_format format, void *samples,
             return BLADERF_ERR_IO;
         } else {
             assert(transferred > 0);
+            assert(bytes_remaining >= (size_t)transferred);
             bytes_remaining -= transferred;
             samples8 += transferred;
         }
     }
 
-    return bytes_to_c16_samples(bytes_total - bytes_remaining);
+    assert(bytes_total >= bytes_remaining);
+    ret = bytes_to_c16_samples(bytes_total - bytes_remaining);
+    assert(ret <= INT_MAX);
+    return (int)ret;
 }
 
 
@@ -1380,6 +1726,7 @@ static void LIBUSB_CALL lusb_stream_cb(struct libusb_transfer *transfer)
     struct lusb_stream_data *stream_data = stream->backend_data;
     size_t i;
     int status;
+    size_t bytes_per_buffer;
 
     /* Check to see if the transfer has been cancelled or errored */
     if( transfer->status != LIBUSB_TRANSFER_COMPLETED ) {
@@ -1439,13 +1786,18 @@ static void LIBUSB_CALL lusb_stream_cb(struct libusb_transfer *transfer)
     else if( stream->state == STREAM_RUNNING ) {
 
         /* Call user callback requesting more data to transmit */
-        assert(transfer->length == transfer->actual_length);
+        if (transfer->length != transfer->actual_length) {
+            log_warning( "Received short transfer\n" );
+            if ((transfer->actual_length & 3) != 0) {
+                log_warning( "Fractional samples received - stream likely corrupt\n" );
+            }
+        }
         next_buffer = stream->cb(
                         stream->dev,
                         stream,
                         &metadata,
                         transfer->buffer,
-                        bytes_to_c16_samples(transfer->length),
+                        bytes_to_c16_samples(transfer->actual_length),
                         stream->user_data
                       );
         if( next_buffer == NULL ) {
@@ -1456,6 +1808,9 @@ static void LIBUSB_CALL lusb_stream_cb(struct libusb_transfer *transfer)
         stream_data->active_transfers--;
     }
 
+    bytes_per_buffer = c16_samples_to_bytes(stream->samples_per_buffer);
+    assert(bytes_per_buffer <= INT_MAX);
+
     /* Check the stream to make sure we're still valid and submit transfer,
      * as the user may want to stop the stream by returning NULL for the next buffer */
     if( next_buffer != NULL ) {
@@ -1465,7 +1820,7 @@ static void LIBUSB_CALL lusb_stream_cb(struct libusb_transfer *transfer)
             lusb->handle,
             stream->module == BLADERF_MODULE_TX ? EP_OUT(0x01) : EP_IN(0x01),
             next_buffer,
-            c16_samples_to_bytes(stream->samples_per_buffer),
+            (int)bytes_per_buffer,
             lusb_stream_cb,
             stream,
             BULK_TIMEOUT
@@ -1551,6 +1906,8 @@ static int lusb_stream(struct bladerf_stream *stream, bladerf_module module)
     struct timeval tv = { 5, 0 };
     const size_t buffer_size = c16_samples_to_bytes(stream->samples_per_buffer);
 
+    assert(buffer_size <= INT_MAX);
+
     /* Currently unused, so zero it out for a sanity check when debugging */
     memset(&metadata, 0, sizeof(metadata));
 
@@ -1562,7 +1919,7 @@ static int lusb_stream(struct bladerf_stream *stream, bladerf_module module)
                         stream,
                         &metadata,
                         NULL,
-                        0,
+                        stream->samples_per_buffer,
                         stream->user_data
                      );
 
@@ -1591,7 +1948,7 @@ static int lusb_stream(struct bladerf_stream *stream, bladerf_module module)
                 lusb->handle,
                 module == BLADERF_MODULE_TX ? EP_OUT(0x01) : EP_IN(0x01),
                 buffer,
-                buffer_size,
+                (int)buffer_size,
                 lusb_stream_cb,
                 stream,
                 BULK_TIMEOUT
@@ -1732,8 +2089,8 @@ const struct bladerf_fn bladerf_lusb_fn = {
 
     FIELD_INIT(.get_cal, lusb_get_cal),
     FIELD_INIT(.get_otp, lusb_get_otp),
-    FIELD_INIT(.get_fw_version, lusb_get_fw_version),
-    FIELD_INIT(.get_fpga_version, lusb_get_fpga_version),
+    FIELD_INIT(.fw_version, lusb_fw_version),
+    FIELD_INIT(.fpga_version, lusb_fpga_version),
     FIELD_INIT(.get_device_speed, lusb_get_device_speed),
 
     FIELD_INIT(.config_gpio_write, lusb_config_gpio_write),
